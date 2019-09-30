@@ -14,8 +14,12 @@ eps = 1e-12
 
 def getEssentialMatrix(F):
     E = K.transpose() @ F @ K
+    
     return E
 def getEssentialConfig(E):
+    U, D, Vh = scipy.linalg.svd(E)
+    e = (D[0] + D[1]) / 2
+    E = U @ np.array([[e,0,0],[0,e,0],[0,0,0]]) @ Vh
     U, D, Vh = scipy.linalg.svd(E)
     return U, D, Vh
 
@@ -62,12 +66,11 @@ def CameraPosition4Config(U, D, Vh):
 def CameraPoseMatrix(K, R, C):
     return K @ R @ np.array([[1,0,0, -C[0]],[0,1,0, -C[1]],[0,0,1, -C[2]]])
 
-def getCameraMatrix(U, Vh, K, R0, C0, R1, C1):
+def getCameraMatrix(K, R0, C0, R1, C1):
     #first camera
     P1 = CameraPoseMatrix(K, R0, C0)#K @ R0 @ np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0]])
 
     #second camera
-    E = U @ np.array([[1,0,0],[0,1,0],[0,0,0]]) @ Vh
     P2 = CameraPoseMatrix(K, R1, C1) #np.concatenate((R1, -C1.reshape(3,1)), axis=1)
     return P1, P2
 

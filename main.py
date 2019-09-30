@@ -9,10 +9,12 @@ from mpl_toolkits import mplot3d
 from Normalized8pointsAlgo import RANSAC
 from CameraConfig import *
 from Triangulation import *
+import matplotlib.cm as cm
+
 from BundleAdjustment import *
 from scipy.optimize import least_squares
-
 import time
+
 
 def drawlines(img1,img2,lines,pts1,pts2):
     ''' img1 - image on which we draw the epilines for the points in img2
@@ -28,18 +30,8 @@ def drawlines(img1,img2,lines,pts1,pts2):
     return img1,img2
 
 
-def TwoImage(img1_name, img2_name, C0, R0):
-    img1 = cv2.imread(img1_name)
-    img2 = cv2.imread(img2_name)
-    img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
-    img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB)
-    #Oriented FAST and Rotated BRIEF
-    orb = cv2.ORB_create(edgeThreshold=3)
-
-    # find the keypoints with ORB
-    kp1, des1 = orb.detectAndCompute(img1,None)
-    kp2, des2 = orb.detectAndCompute(img2,None)
-
+def TwoImage(img1, img2, des1, kp1, des2, kp2, pre_C, pre_R):
+    
     # create BFMatcher object
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 
@@ -49,66 +41,51 @@ def TwoImage(img1_name, img2_name, C0, R0):
     # Sort them in the order of their distance.
     matches = sorted(matches, key = lambda x:x.distance)
 
-    #img3 = cv2.drawMatches(img1, kp1, img2, kp2, matches, None, flags=2)
-
-    #plt.imshow(img3)
-    #plt.show()
-
     trainPoints = cv2.KeyPoint_convert([kp1[matches[i].trainIdx] for i in range(len(matches))])
     queryPoints = cv2.KeyPoint_convert([kp2[matches[i].queryIdx] for i in range(len(matches))])
     pts1 = np.int32(trainPoints)
     pts2 = np.int32(queryPoints)
     
     my_F, train_inliers, query_inliers, ind = RANSAC(pts1, pts2, max_iter_times = 1000000) 
+
+    # Find epilines corresponding to points in right image (second image) and
+    # drawing its lines on left image
+    lines1 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 2, my_F)
+    lines1 = lines1.reshape(-1,3)
+    left_img_with_lines, _ = drawlines(img1.copy(),img2.copy(),lines1,train_inliers,query_inliers)
+    # Find epilines corresponding to points in left image (first image) and
+    # drawing its lines on right image
+    lines2 = cv2.computeCorrespondEpilines(train_inliers.reshape(-1,1,2), 1, my_F)
+    lines2 = lines2.reshape(-1,3)
+    right_img_with_lines, _ = drawlines(img2.copy(),img1.copy(),lines2,query_inliers,train_inliers)
+
     
-#     # Find epilines corresponding to points in right image (second image) and
-#     # drawing its lines on left image
-#     lines1 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 2, my_F)
-#     lines1 = lines1.reshape(-1,3)
-#     img5,img6 = drawlines(img1.copy(),img2.copy(),lines1,train_inliers,query_inliers)
-#     # Find epilines corresponding to points in left image (first image) and
-#     # drawing its lines on right image
-#     lines2 = cv2.computeCorrespondEpilines(train_inliers.reshape(-1,1,2), 1, my_F)
-#     lines2 = lines2.reshape(-1,3)
-#     img3,img4 = drawlines(img2.copy(),img1.copy(),lines2,query_inliers,train_inliers)
-# #     print("my Fundamental matrix")
-#     plt.imshow(img5)
-#     plt.show()
-#     plt.imshow(img3)
-#     plt.show()
-    
-#     imageA = img1.copy()
-#     imageB = img2.copy()
-#     for i in train_inliers:
-#         imageA = cv2.circle(imageA , (int(i[0]), int(i[1])), 2, (255, 0, 0), 20)
-#     plt.imshow(imageA)
-#     plt.show()
-#     for i in query_inliers:
-#         imageB = cv2.circle(imageB , (int(i[0]), int(i[1])), 2, (255, 0, 0), 20)
-#     print("my inliers")
-#     plt.imshow(imageB)
-#     plt.show()
-    
-#     print('my F results')
 
     E = getEssentialMatrix(my_F)
     U, D, Vh = getEssentialConfig(E)
 
     #second camera
+    #C, R are relative to pre camera at [0,0,0]
     C1, R1 = CameraPosition1Config(U, D, Vh)
     C2, R2 = CameraPosition2Config(U, D, Vh)
     C3, R3 = CameraPosition3Config(U, D, Vh)
     C4, R4 = CameraPosition4Config(U, D, Vh)
+    
     Cs = [C1,C2,C3,C4]
     Rs = [R1,R2,R3,R4]
-
+    
+    #relative to previous camera at exactly position
+    for C, R in zip(Cs, Rs):
+        R = R @ pre_R.transpose()
+        C += -R @ pre_C 
+        
     best_ct = 0
     best_secondCamera_C = None
     best_secondCamera_R = None
     points = None
 
     for C,R in zip(Cs, Rs):
-        P1, P2 = getCameraMatrix(U, Vh, K, R0, C0, R, C) 
+        P1, P2 = getCameraMatrix(K, pre_R, pre_C, R, C) 
         temp_points = getWorldPoints(train_inliers, query_inliers, P1, P2)
         n_in_front_of_C1, n_in_front_of_C2 = CheckCheirality(temp_points, C1, R1, C2, R2)
         if(n_in_front_of_C1 + n_in_front_of_C2 > best_ct):
@@ -118,78 +95,101 @@ def TwoImage(img1_name, img2_name, C0, R0):
             points = temp_points
     #print("max points in front of both cameras:", best_ct)
     print("len(points):",len(points))
-    #XZ
+##########draw############    
+#     #XZ
 #     plt.scatter(points[:,0], points[:,2])
-#     plt.scatter(C0[0], C0[2], c='red')
-#     plt.scatter(C1[0], C1[2], c='black')
+#     plt.scatter(pre_C[0], pre_C[2], c='red')
+#     plt.scatter(best_secondCamera_C[0], best_secondCamera_C[2], c='black')
 #     plt.show()
 #     ax = plt.axes(projection='3d')
+    
 #     ax.scatter(points[:,0], points[:,1], points[:,2], c=points[:,2], cmap='viridis', linewidth=0.5);
-#     ax.scatter(C0[0], C0[1], C0[2], c='red', linewidth=15);
-#     ax.scatter(C1[0], C1[1], C1[2], c='black', linewidth=15);
+#     ax.scatter(pre_C[0], pre_C[1], pre_C[2], c='red', linewidth=15);
+#     ax.scatter(best_secondCamera_C[0], best_secondCamera_C[1], best_secondCamera_C[2], c='black', linewidth=15);
 #     plt.show()
-    return best_secondCamera_C, best_secondCamera_R, K.astype(np.float64), train_inliers.astype(np.float64), query_inliers.astype(np.float64), points.astype(np.float64)
+#########################    
+    return [left_img_with_lines, right_img_with_lines],best_secondCamera_C, best_secondCamera_R, K.astype(np.float64), train_inliers.astype(np.float64), query_inliers.astype(np.float64), points.astype(np.float64)
     
 if __name__== "__main__":
     files = []
-    for file in glob.glob("*.bmp"):
+    for file in glob.glob("*.jpg"):
         print(file)
         files.append(file)
+    files.sort()
+    
+    imgs = []
+    
+    for file in files:
+        img = cv2.imread(file)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        imgs.append(img)
+        
     camera_params = []
     camera_indices = []
     points_3d = []
     points_2d = []
-    
-    #first camera
-    C0 = np.array([0,0,0])
-    R0 = np.array([[1,0,0],[0,1,0],[0,0,1]])
-    
+ 
     C = {}
     R = {}
-    C[0] = C0
-    R[0] = R0
+    pre_img = None
+    pre_kp = None
+    pre_des = None
+    dist_coef = np.zeros((4,1))
     
-    #table = []
+    lines_imgs = []
     
-    for img1_ct,img1 in enumerate(files):
-        for img2_ct,img2 in enumerate(files):
-            if img1 != img2 and img1_ct < img2_ct:
-                print(img1_ct, img2_ct, img1, img2)
-                dist_coef = np.zeros((4,1))
-                outC, outR, K, train_inliers, query_inliers, points3D = TwoImage(img1,img2, C[img1_ct], R[img1_ct])
-                if img1_ct == 0:
-                    C[img2_ct] = outC
-                    R[img2_ct] = outR
-                print(len(train_inliers))
-                print(len(points3D))
-                try:
-                    (_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], train_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)
-                except:
-                    if(img1_ct==0):
-                        raise
-                    else:
-                        continue
-                camera_params.append([rvec[0].item(), rvec[1].item(), rvec[2].item(), tvec[0].item(), tvec[1].item(), tvec[2].item(), f1, 0, 0])
-                for i in range(len(points3D)):
-                    points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
-                    camera_indices.append(img1_ct)
-                    
-                for i in range(len(train_inliers)):
-                    points_2d.append(train_inliers[i]) 
-                
-                
-                try:
-                    (_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], query_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)
-                except:
-                    continue
-                camera_params.append([rvec[0].item(), rvec[1].item(), rvec[2].item(), tvec[0].item(), tvec[1].item(), tvec[2].item(), f1, 0, 0])
-                for i in range(len(points3D)):
-                    points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
-                    camera_indices.append(img2_ct)
-                for i in range(len(query_inliers)):
-                    points_2d.append(query_inliers[i])
-                
+    for img_ct, img in tqdm(enumerate(imgs)):
+        print(img_ct)
+        if(img_ct == 0):
+            orb = cv2.ORB_create(edgeThreshold=3)
+            pre_img = img
+            pre_kp, pre_des = orb.detectAndCompute(pre_img,None)
+            #first camera
+            pre_C = np.array([0,0,0], dtype=np.float64)
+            pre_R = np.array([[1,0,0],[0,1,0],[0,0,1]], dtype=np.float64)
+            C[img_ct] = pre_C
+            R[img_ct] = pre_R
+            continue;
+        else:
+            #Oriented FAST and Rotated BRIEF
+            orb = cv2.ORB_create(edgeThreshold=3)
 
+            # find the keypoints with ORB
+            kp, des = orb.detectAndCompute(img,None)
+            
+            lines_img, outC, outR, K, train_inliers, query_inliers, points3D = TwoImage(imgs[img_ct-1], img, pre_des, pre_kp, des, kp, C[img_ct-1] ,R[img_ct-1])
+            lines_imgs.append(lines_img)
+            #the first image hasn't been count
+            if(img_ct == 1):
+                #add the first image rvec and tvec
+                #(_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], train_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)            
+                tvec = C[0]
+                rvec, jacobian = cv2.Rodrigues(R[0])
+                print(tvec)
+                print(rvec)
+                camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
+                for i in range(len(points3D)):
+                    points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
+                    camera_indices.append(0)
+                for i in range(len(train_inliers)):
+                     points_2d.append(train_inliers[i]) 
+            
+            tvec = outC
+            rvec, jacobian = cv2.Rodrigues(outR)
+            #(_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], query_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)
+            camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
+            for i in range(len(points3D)):
+                points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
+                camera_indices.append(img_ct)              
+            for i in range(len(query_inliers)):
+                points_2d.append(query_inliers[i])    
+            
+            pre_img = img
+            pre_kp = kp
+            pre_des = des
+            C[img_ct] = outC
+            R[img_ct] = outR
+    
     camera_params = np.array(camera_params)
     camera_indices = np.array(camera_indices)
     print(len(points_3d))
@@ -210,25 +210,30 @@ if __name__== "__main__":
     x0 = np.hstack((camera_params.ravel(), points_3d.ravel()))
 
     f0 = fun(x0, n_cameras, n_points, camera_indices, point_indices, points_2d)
-    #plt.plot(f0)
     A = bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indices)
     t0 = time.time()
     res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, method='trf',
                     args=(n_cameras, n_points, camera_indices, point_indices, points_2d))
     t1 = time.time()
     print("Optimization took {0:.0f} seconds".format(t1 - t0))
-    #plt.plot(res.fun)
-    #fun(params, n_cameras, n_points, camera_indices, point_indices, points_2d)
     
     camera_params = res.x[:n_cameras * 9].reshape((n_cameras, 9))
     points_3d = res.x[n_cameras * 9:].reshape((n_points, 3))
-    #XZ
-    plt.scatter(points_3d[:,0], points_3d[:,2])
-    #plt.scatter(C0[0], C0[2], c='red')
-    #plt.scatter(C1[0], C1[2], c='black')
+    
     plt.show()
     ax = plt.axes(projection='3d')
     ax.scatter(points_3d[:,0], points_3d[:,1], points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.5);
-    #ax.scatter(C0[0], C0[1], C0[2], c='red', linewidth=15);
-    #ax.scatter(C1[0], C1[1], C1[2], c='black', linewidth=15);
+    colors = cm.rainbow(np.linspace(0, 1, len(C)))
+    for i,c in zip(C,colors):
+        print(i)
+        ax.scatter(C[i][0], C[i][1], C[i][2], c=c, linewidth=15, label='camera'+str(i+1));
+    ax.legend()
+    plt.show()
+    
+    plt.figure()
+    for i, (left, right) in enumerate(lines_imgs):
+        plt.subplot(len(lines_imgs*2),2,2*i+1)
+        plt.imshow(left)
+        plt.subplot(len(lines_imgs*2),2,2*i+2)
+        plt.imshow(right)
     plt.show()

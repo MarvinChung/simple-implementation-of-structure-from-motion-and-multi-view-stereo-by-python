@@ -126,7 +126,7 @@ def RANSAC(trainPoints, queryPoints, max_iter_times = 1000000, device = 'cuda' i
     
     batch_size = batches.shape[0]
     
-    episilon = batches.new_full((1, batch_size), 0.00001).view(batch_size).to(device)
+    episilon = batches.new_full((1, batch_size), 0.000001).view(batch_size).to(device)
     train_inliers = []
     query_inliers = []
     
@@ -135,7 +135,7 @@ def RANSAC(trainPoints, queryPoints, max_iter_times = 1000000, device = 'cuda' i
         sample_points = random.sample(data, 8)
         F, LSmodel = EstimateFundamentalMatrix(sample_points, T1, T2, device)
         err = LSmodel.calc_err(batches)
-        if((err < episilon).float().mean().item() > 0.98):           
+        if((err < episilon).float().mean().item() > 0.99):           
             ind = np.where((err.cpu()<episilon.cpu()))
             train_inliers = trainPoints[ind]
             query_inliers = queryPoints[ind]
