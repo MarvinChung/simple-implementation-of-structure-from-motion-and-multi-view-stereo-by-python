@@ -14,6 +14,8 @@ import matplotlib.cm as cm
 from BundleAdjustment import *
 from scipy.optimize import least_squares
 import time
+import pdb
+from argparse import ArgumentParser
 
 
 def drawlines(img1,img2,lines,pts1,pts2):
@@ -46,22 +48,29 @@ def TwoImage(img1, img2, des1, kp1, des2, kp2, pre_C, pre_R):
     pts1 = np.int32(trainPoints)
     pts2 = np.int32(queryPoints)
     
-    my_F, train_inliers, query_inliers, ind = RANSAC(pts1, pts2, max_iter_times = 1000000) 
-
+    #use opencv 
+    F, mask = cv2.findFundamentalMat(trainPoints,queryPoints,cv2.FM_LMEDS)
+    train_inliers = trainPoints[mask.ravel()==1]
+    query_inliers = queryPoints[mask.ravel()==1]
+    #use myself F
+    #my_F, train_inliers, query_inliers, ind = RANSAC(pts1, pts2, max_iter_times = 1000) 
+    
+    
+    
     # Find epilines corresponding to points in right image (second image) and
     # drawing its lines on left image
-    lines1 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 2, my_F)
+    lines1 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 2, F)
     lines1 = lines1.reshape(-1,3)
     left_img_with_lines, _ = drawlines(img1.copy(),img2.copy(),lines1,train_inliers,query_inliers)
     # Find epilines corresponding to points in left image (first image) and
     # drawing its lines on right image
-    lines2 = cv2.computeCorrespondEpilines(train_inliers.reshape(-1,1,2), 1, my_F)
+    lines2 = cv2.computeCorrespondEpilines(train_inliers.reshape(-1,1,2), 1, F)
     lines2 = lines2.reshape(-1,3)
     right_img_with_lines, _ = drawlines(img2.copy(),img1.copy(),lines2,query_inliers,train_inliers)
 
     
 
-    E = getEssentialMatrix(my_F)
+    E = getEssentialMatrix(F)
     U, D, Vh = getEssentialConfig(E)
 
     #second camera
@@ -94,7 +103,7 @@ def TwoImage(img1, img2, des1, kp1, des2, kp2, pre_C, pre_R):
             best_secondCamera_R = R
             points = temp_points
     #print("max points in front of both cameras:", best_ct)
-    print("len(points):",len(points))
+    #print("len(points):",len(points))
 ##########draw############    
 #     #XZ
 #     plt.scatter(points[:,0], points[:,2])
@@ -110,13 +119,12 @@ def TwoImage(img1, img2, des1, kp1, des2, kp2, pre_C, pre_R):
 #########################    
     return [left_img_with_lines, right_img_with_lines],best_secondCamera_C, best_secondCamera_R, K.astype(np.float64), train_inliers.astype(np.float64), query_inliers.astype(np.float64), points.astype(np.float64)
     
-if __name__== "__main__":
+def main(args):
     files = []
-    for file in glob.glob("*.jpg"):
-        print(file)
+    for file in glob.glob("*."+args.img_type):      
         files.append(file)
     files.sort()
-    
+    print(files)
     imgs = []
     
     for file in files:
@@ -138,8 +146,8 @@ if __name__== "__main__":
     
     lines_imgs = []
     
-    for img_ct, img in tqdm(enumerate(imgs)):
-        print(img_ct)
+    for img_ct, img in tqdm(enumerate(imgs), total = len(imgs)):
+        #print(img_ct)
         if(img_ct == 0):
             orb = cv2.ORB_create(edgeThreshold=3)
             pre_img = img
@@ -165,8 +173,8 @@ if __name__== "__main__":
                 #(_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], train_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)            
                 tvec = C[0]
                 rvec, jacobian = cv2.Rodrigues(R[0])
-                print(tvec)
-                print(rvec)
+                #print(tvec)
+                #print(rvec)
                 camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
                 for i in range(len(points3D)):
                     points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
@@ -192,7 +200,7 @@ if __name__== "__main__":
     
     camera_params = np.array(camera_params)
     camera_indices = np.array(camera_indices)
-    print(len(points_3d))
+    print("len points:", len(points_3d))
     point_indices = np.array(range(len(points_3d)))
     points_3d = np.array(points_3d)
     points_2d = np.array(points_2d)
@@ -221,12 +229,13 @@ if __name__== "__main__":
     points_3d = res.x[n_cameras * 9:].reshape((n_points, 3))
     
     plt.show()
+    scale = 100
     ax = plt.axes(projection='3d')
-    ax.scatter(points_3d[:,0], points_3d[:,1], points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.5);
+    ax.scatter(scale * points_3d[:,0], scale * points_3d[:,1], scale * points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.5);
     colors = cm.rainbow(np.linspace(0, 1, len(C)))
     for i,c in zip(C,colors):
         print(i)
-        ax.scatter(C[i][0], C[i][1], C[i][2], c=c, linewidth=15, label='camera'+str(i+1));
+        ax.scatter(scale * C[i][0], scale * C[i][1], scale * C[i][2], c=c, linewidth=15, label='camera'+str(i+1));
     ax.legend()
     plt.show()
     
@@ -237,3 +246,9 @@ if __name__== "__main__":
         plt.subplot(len(lines_imgs*2),2,2*i+2)
         plt.imshow(right)
     plt.show()
+    
+if __name__== "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("-t", help="image file type", dest="img_type", default="bmp")
+    args = parser.parse_args()
+    main(args)

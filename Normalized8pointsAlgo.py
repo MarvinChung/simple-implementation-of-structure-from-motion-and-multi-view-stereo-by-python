@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import time
 import numpy as np
+
 #Normalized 8-point algorithm
 
 class LinearLeastSquaresModel():
@@ -18,8 +19,8 @@ class LinearLeastSquaresModel():
         _, _, Vh = scipy.linalg.svd(data)
         #(Hermitian) transpose back
         x = Vh.transpose()[:, -1];
-        U, D, Vh = scipy.linalg.svd(x.reshape((3, 3)))
-        F = U @ np.diag(np.array([D[1], D[2], 0])) @ Vh
+        U, D, Vh = scipy.linalg.svd(x.reshape((3, 3)).transpose())
+        F = U @ np.diag(np.array([D[0], D[1], 0])) @ Vh
         F = T2.transpose() @ F @ T1
         self.x = torch.tensor(F).view(9).to(self.device);
         return F
@@ -114,7 +115,7 @@ def transform(a,b):
     return mat
 
     
-def RANSAC(trainPoints, queryPoints, max_iter_times = 1000000, device = 'cuda' if torch.cuda.is_available() else 'cpu'):
+def RANSAC(trainPoints, queryPoints, max_iter_times = 1000, device = 'cuda' if torch.cuda.is_available() else 'cpu'):
     
     t = time.time()
     x1, T1 = normalise2dpts(convert2Homogeneous(trainPoints))
@@ -126,7 +127,7 @@ def RANSAC(trainPoints, queryPoints, max_iter_times = 1000000, device = 'cuda' i
     
     batch_size = batches.shape[0]
     
-    episilon = batches.new_full((1, batch_size), 0.000001).view(batch_size).to(device)
+    episilon = batches.new_full((1, batch_size), 0.01).view(batch_size).to(device)
     train_inliers = []
     query_inliers = []
     
@@ -135,16 +136,19 @@ def RANSAC(trainPoints, queryPoints, max_iter_times = 1000000, device = 'cuda' i
         sample_points = random.sample(data, 8)
         F, LSmodel = EstimateFundamentalMatrix(sample_points, T1, T2, device)
         err = LSmodel.calc_err(batches)
-        if((err < episilon).float().mean().item() > 0.99):           
+        if((err < episilon).float().mean().item() > 0.95):           
             ind = np.where((err.cpu()<episilon.cpu()))
             train_inliers = trainPoints[ind]
             query_inliers = queryPoints[ind]
             break
         iterations += 1
-        
+    
     print('[RANSAC] takes ', time.time() - t,'sec')
     print('[RANSAC] iteration', iterations,' err:', err.mean().item())     
     if(iterations == max_iter_times):
         print("no result found by RANSAC")
-    
+        print(err)
+        pdb.set_trace()
+        
+    F, _ = EstimateFundamentalMatrix(transform(train_inliers,query_inliers), T1, T2, device)     
     return F, train_inliers, query_inliers, ind
