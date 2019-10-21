@@ -2,18 +2,18 @@ import numpy as np
 import scipy.linalg
 
 #hyperperamaters
-f1 = 568.996140852
-f2 = 568.988362396
-s = 0
-mx = my = 1
-px = 643.21055941
-py = 477.982801038
-
-# f1 = f2 = 40
+# f1 = 568.996140852
+# f2 = 568.988362396
 # s = 0
 # mx = my = 1
-# px = 0
-# py = 0
+# px = 643.21055941
+# py = 477.982801038
+
+f1 = f2 = 100
+s = 0
+mx = my = 1
+px = 0
+py = 0
 
 K = np.array([[f1*mx, s, px],[0, f2*my, py], [0, 0, 1]])
 
@@ -96,7 +96,8 @@ def getCameraMatrix(K, R0, C0, R1, C1):
 def CheckCheirality(points, C1, R1, C2, R2):
     pts_in_front_of_C1 = []
     pts_in_front_of_C2 = []
-    idx = []
+    temp_idx = []
+    idx = [] 
     for (ct,point) in enumerate(points):
         is_chosen = False
         if(R1[2,:].dot(point-C1)>0):
@@ -108,5 +109,14 @@ def CheckCheirality(points, C1, R1, C2, R2):
             is_chosen = True
             
         if(is_chosen):
-            idx.append(ct)
+            temp_idx.append(ct)
+            
+    temp_idx = np.array(temp_idx)
+    Percentile = np.percentile(points[temp_idx],[0,25,50,75,100],axis=0)
+    IQR = Percentile[3] - Percentile[1]
+    UpLimit = Percentile[3] + IQR*1.5
+    DownLimit = Percentile[1] - IQR*1.5
+    for i in temp_idx:
+        if(points[i][0] >= DownLimit[0] and points[i][1] >= DownLimit[1] and points[i][2] >= DownLimit[2] and points[i][0] <= UpLimit[0] and points[i][1] <= UpLimit[1] and points[i][2] <= UpLimit[2]):
+            idx.append(i)
     return np.array(pts_in_front_of_C1).reshape(-1,3), np.array(pts_in_front_of_C2).reshape(-1,3), np.array(idx)

@@ -75,9 +75,9 @@ def TwoImage(img1, img2, des1, kp1, des2, kp2, pre_C, pre_R, K = None, calibs = 
     
     if(calibs == None):
         best_secondCamera_C, best_secondCamera_R, points, chosen_train_inliers, chosen_query_inliers = getCameraPos(train_inliers, query_inliers, F, pre_R, pre_C, K = K)
-        return [left_img_with_lines, right_img_with_lines], best_secondCamera_C, best_secondCamera_R, chosen_train_inliers.astype(np.float64), chosen_query_inliers.astype(np.float64), points.astype(np.float64)
+        return [left_img_with_lines, right_img_with_lines], best_secondCamera_C, best_secondCamera_R, chosen_train_inliers.astype(np.float64), chosen_query_inliers.astype(np.float64), points.astype(np.float64), matches
     else:
-        return [left_img_with_lines, right_img_with_lines], train_inliers.astype(np.float64), query_inliers.astype(np.float64), getWorldPoints(train_inliers, query_inliers, P1, P2).astype(np.float64)
+        return [left_img_with_lines, right_img_with_lines], train_inliers.astype(np.float64), query_inliers.astype(np.float64), getWorldPoints(train_inliers, query_inliers, P1, P2).astype(np.float64), matches
     
 def getCameraPos(train_inliers, query_inliers, F, pre_R, pre_C, K = None):    
 
@@ -98,8 +98,8 @@ def getCameraPos(train_inliers, query_inliers, F, pre_R, pre_C, K = None):
     print("[DEBUG]pre_R\n",pre_R)
     print("[DEBUG]pre_C\n",pre_C)
     for i, (C_diff, R_diff) in enumerate(zip(Cs, Rs)):
-        Rs[i] = R_diff @ pre_R
-        Cs[i] = C_diff @ pre_R + pre_C
+        Rs[i] = pre_R @ R_diff 
+        Cs[i] = pre_R @ C_diff + pre_C
         
     best_ct = 0
     best_secondCamera_C = None
@@ -117,37 +117,40 @@ def getCameraPos(train_inliers, query_inliers, F, pre_R, pre_C, K = None):
             best_secondCamera_R = Rs[i]
             best_idx = idx
             points = temp_points[idx]
+    
     print("[DEBUG]R\n",best_secondCamera_R)
     print("[DEBUG]C\n",best_secondCamera_C)
-
-    
+    #dist_coef = np.zeros((4,1))
+    #(_, rvec, tvec, _) = cv2.solvePnPRansac(points, query_inliers[best_idx], K, dist_coef, cv2.SOLVEPNP_EPNP)
     
     if(best_ct == 0):
         print("[DEBUG]best_ct==0")
-        pdb.set_trace()
-##########draw############           
-    scale = 1
-    print("[DEBUG]pre_C",pre_C)
-    print("[DEBUG]pre_R",pre_R)
-    print("[DEBUG]C",best_secondCamera_C)
-    print("[DEBUG]R",best_secondCamera_R)
-    ax = plt.axes(projection='3d')
-    ax.scatter(scale * pts_in_front_of_C1[:,0], scale * pts_in_front_of_C1[:,1], scale * pts_in_front_of_C1[:,2], c="blue", cmap='viridis', linewidth=0.5);
-    ax.scatter(scale * pts_in_front_of_C2[:,0], scale * pts_in_front_of_C2[:,1], scale * pts_in_front_of_C2[:,2], c="pink", cmap='viridis', linewidth=0.5);
-    colors = cm.rainbow(np.linspace(0, 1, 2))
+        pdb.set_trace()        
+        
+  ##########draw############           
+#     scale = 1
+#     print("[DEBUG]pre_C",pre_C)
+#     print("[DEBUG]pre_R",pre_R)
+#     print("[DEBUG]C", best_secondCamera_C)
+#     print("[DEBUG]R", best_secondCamera_R)
+#     ax = plt.axes(projection='3d')
+#     ax.scatter(scale * pts_in_front_of_C1[:,0], scale * pts_in_front_of_C1[:,1], scale * pts_in_front_of_C1[:,2], c="blue", cmap='viridis', linewidth=0.5);
+#     ax.scatter(scale * pts_in_front_of_C2[:,0], scale * pts_in_front_of_C2[:,1], scale * pts_in_front_of_C2[:,2], c="pink", cmap='viridis', linewidth=0.5);
+#     colors = cm.rainbow(np.linspace(0, 1, 2))
     
-    ax.scatter(scale * pre_C[0], scale * pre_C[1], scale * pre_C[2], c=colors[0], linewidth=8, label='camera1');
-    ax.scatter(scale * best_secondCamera_C[0], scale * best_secondCamera_C[1], scale * best_secondCamera_C[2], c=colors[1], linewidth=8, label='camera2');
-    ax.legend()
-    plt.show() 
+#     ax.scatter(scale * pre_C[0], scale * pre_C[1], scale * pre_C[2], c=colors[0], linewidth=8, label='camera1');
+#     ax.scatter(scale * best_secondCamera_C[0], scale * best_secondCamera_C[1], scale * best_secondCamera_C[2], c=colors[1], linewidth=8, label='camera2');
+#     ax.legend()
+#     plt.show() 
 
-#########################         
-        
-        
-    return best_secondCamera_C, best_secondCamera_R, points.astype(np.float64), train_inliers[best_idx], query_inliers[best_idx] 
+#########################       
+    return best_secondCamera_C, best_secondCamera_R, points.astype(np.float32), train_inliers[best_idx], query_inliers[best_idx] 
 
 
 def main(args):
+    
+    scale = args.scale
+    
     files = []
     print("get img from" + args.img_dir+"/*."+args.img_type)
     for file in glob.glob(args.img_dir+"/*."+args.img_type):      
@@ -162,7 +165,7 @@ def main(args):
         
     files.sort()
 
-    #files = files[:2]
+    #files = files[:4]
     
     print(files)
     
@@ -178,13 +181,13 @@ def main(args):
     camera_indices = []
     points_3d = []
     points_2d = []
+    point_indices = []
  
     C = {}
     R = {}
     pre_img = None
     pre_kp = None
     pre_des = None
-    dist_coef = np.zeros((4,1))
     
     lines_imgs = []
     
@@ -207,8 +210,8 @@ def main(args):
             orb = cv2.ORB_create(edgeThreshold=3)
             pre_kp, pre_des = orb.detectAndCompute(img,None)
             #first camera
-            C[0] = np.array([0,0,0], dtype=np.float64)
-            R[0] = np.array([[1,0,0],[0,1,0],[0,0,1]], dtype=np.float64)
+            C[0] = np.array([0,0,0], dtype=np.float32)
+            R[0] = np.array([[1,0,0],[0,1,0],[0,0,1]], dtype=np.float32)
         else:
             #Oriented FAST and Rotated BRIEF
             orb = cv2.ORB_create(edgeThreshold=3)
@@ -216,32 +219,67 @@ def main(args):
             # find the keypoints with ORB
             kp, des = orb.detectAndCompute(img,None)
             if calibs == None:
-                lines_img, C[img_ct], R[img_ct], train_inliers, query_inliers, points3D = TwoImage(imgs[img_ct-1], img, pre_des, pre_kp, des, kp, C[img_ct-1] ,R[img_ct-1], K = K, calibs = None)
+                lines_img, C[img_ct], R[img_ct], train_inliers, query_inliers, points3D, matches = TwoImage(imgs[img_ct-1], img, pre_des, pre_kp, des, kp, C[img_ct-1] ,R[img_ct-1], K = K, calibs = None)
+                
                 #the first image hasn't been count
                 if(img_ct == 1):
                     #add the first image rvec and tvec
                     #(_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], train_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)            
-                    tvec = -R[0].transpose()@C[0]
+                    #C = -R.transpose() * t
+                    #t = -R * C
+                    tvec = -R[0]@C[0]
                     rvec, jacobian = cv2.Rodrigues(R[0])
                     #print(tvec)
                     #print(rvec)
                     camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
                     for i in range(len(points3D)):
                         points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
-                        camera_indices.append(0)
                     for i in range(len(train_inliers)):
-                         points_2d.append(train_inliers[i]) 
+                        points_2d.append(train_inliers[i])
+                        camera_indices.append(0)
 
-                tvec = -R[img_ct].transpose()@C[img_ct]
+                tvec = -R[img_ct]@C[img_ct]
                 rvec, jacobian = cv2.Rodrigues(R[img_ct])
                 #(_, rvec, tvec, _) = cv2.solvePnPRansac(points3D[:,0:3], query_inliers, K, dist_coef, cv2.SOLVEPNP_EPNP)
                 camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
                 for i in range(len(points3D)):
                     points_3d.append([points3D[i,0], points3D[i,1], points3D[i,2]])
-                    camera_indices.append(img_ct)              
+                    
                 for i in range(len(query_inliers)):
                     points_2d.append(query_inliers[i])    
+                    camera_indices.append(img_ct)
                 
+                                
+                ##########draw############ 
+                if(args.debug != 0):
+                    fig=plt.figure(figsize=(64, 64))
+                    imageA = imgs[img_ct-1].copy()
+                    imageB = imgs[img_ct].copy()
+                    for i in train_inliers:
+                        imageA = cv2.circle(imageA , (int(i[0]), int(i[1])), 2, (255, 0, 0), 20)
+                    fig.add_subplot(1, 2, 1)
+                    plt.imshow(imageA)
+                    for i in query_inliers:
+                        imageB = cv2.circle(imageB , (int(i[0]), int(i[1])), 2, (255, 0, 0), 20)
+                    fig.add_subplot(1, 2, 2)
+                    plt.imshow(imageB)
+                    plt.show()
+                    img3 = cv2.drawMatches(imageA, pre_kp, imageB, kp, matches, None, flags=2)
+                    plt.imshow(img3)
+                    plt.show()
+
+
+                    ax = plt.axes(projection='3d')
+                    ax.set_title("debug add")
+                    ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c="blue", cmap='viridis', linewidth=0.5);
+                    colors = cm.rainbow(np.linspace(0, 1, len(C)))
+                    for ct, c in enumerate(colors):
+                        ax.scatter(scale * C[ct][0], scale * C[ct][1], scale * C[ct][2], c=c, linewidth=8, label='camera'+str(ct+1));
+                    ax.legend()
+                    plt.show() 
+
+
+                ######################## 
                 
             else:
                 try:
@@ -256,11 +294,39 @@ def main(args):
             pre_kp = kp
             pre_des = des
 
+    #points_3d = np.array(points_3d).reshape((-1,3))
+    
+    fig=plt.figure(figsize=(64, 64))
+    columns = math.ceil(math.pow(len(2 * lines_imgs), 1/2))
+    rows = math.ceil(len(lines_imgs) * 2 / columns )
+    for i, (left, right) in enumerate(lines_imgs):
+        img = left
+        fig.add_subplot(rows, columns, 2*i+1)
+        plt.imshow(img,aspect='auto')
+        
+        img = right
+        fig.add_subplot(rows, columns, 2*i+2)
+        plt.imshow(img,aspect='auto')
+    plt.show()
+    
+
+    ax = plt.axes(projection='3d')
+    ax.set_title('without bundle adjustment')
+    ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(points_3d)[:,2], cmap='viridis', linewidth=0.5);
+    if calibs == None:
+        colors = cm.rainbow(np.linspace(0, 1, len(C)))
+        for ct, c in enumerate(colors):
+            ax.scatter(scale * C[ct][0], scale * C[ct][1], scale * C[ct][2], c=c, linewidth=8, label='camera'+str(ct+1));
+        ax.legend()
+    plt.show()
+    
+    
     if calibs == None:
         camera_params = np.array(camera_params)
         camera_indices = np.array(camera_indices)
         print("len points:", len(points_3d))
         point_indices = np.array(range(len(points_3d)))
+        #point_indices = np.array(point_indices)
         points_3d = np.array(points_3d)
         points_2d = np.array(points_2d)
         n_cameras = camera_params.shape[0]
@@ -275,7 +341,6 @@ def main(args):
         print("Total number of residuals: {}".format(m))
         print(camera_params[0])
         x0 = np.hstack((camera_params.ravel(), points_3d.ravel()))
-
         f0 = fun(x0, n_cameras, n_points, camera_indices, point_indices, points_2d)
         A = bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indices)
         t0 = time.time()
@@ -286,22 +351,7 @@ def main(args):
 
         camera_params = res.x[:n_cameras * 9].reshape((n_cameras, 9))
         points_3d = res.x[n_cameras * 9:].reshape((n_points, 3))
-    else:
-        points_3d = np.array(points_3d).reshape((-1,3))
     
-    
-    fig=plt.figure(figsize=(64, 64))
-    columns = 6
-    rows = math.ceil(len(lines_imgs) * 2 / 6 )
-    for i, (left, right) in enumerate(lines_imgs):
-        img = left
-        fig.add_subplot(rows, columns, 2*i+1)
-        plt.imshow(img,aspect='auto')
-        
-        img = right
-        fig.add_subplot(rows, columns, 2*i+2)
-        plt.imshow(img,aspect='auto')
-    plt.show()
     
     
 #     for i, (left, right) in enumerate(lines_imgs):
@@ -325,30 +375,38 @@ def main(args):
     clean_points_3d = np.array(clean_points_3d)
     print("clean_points_3d points:",len(clean_points_3d))
     
-    scale = 1
     ax = plt.axes(projection='3d')
+    ax.set_title('with bundle adjustment(with cameara)')
     ax.scatter(scale * clean_points_3d[:,0], scale * clean_points_3d[:,1], scale * clean_points_3d[:,2], c=clean_points_3d[:,2], cmap='viridis', linewidth=0.5);
+    
+    bundle_C = []
+    
     if calibs == None:
-        colors = cm.rainbow(np.linspace(0, 1, len(C)))
-        for i,c in zip(C,colors):
-            ax.scatter(scale * C[i][0], scale * C[i][1], scale * C[i][2], c=c, linewidth=8, label='camera'+str(i+1));
+        colors = cm.rainbow(np.linspace(0, 1, len(camera_params)))
+        #camera_params.append([rvec[0][0], rvec[1][0], rvec[2][0], tvec[0], tvec[1], tvec[2], f1, 0, 0])
+        for ct, (i,c) in enumerate(zip(camera_params,colors)):
+            #C = -R.transpose() * t
+            cam_pos = -cv2.Rodrigues(np.array([i[0],i[1],i[2]]))[0] @ np.array([[i[4]], [i[5]], [i[6]]])
+            bundle_C.append(cam_pos)
+            ax.scatter(scale * cam_pos[0], scale * cam_pos[1], scale * cam_pos[2], c=c, linewidth=8, label='camera'+str(ct+1));
         ax.legend()
     plt.show()
 
     ax = plt.axes(projection='3d')
-    if calibs == None:
-        colors = cm.rainbow(np.linspace(0, 1, len(C)))
-        for i,c in zip(C,colors):
-            ax.scatter(scale * C[i][0], scale * C[i][1], scale * C[i][2], c=c, linewidth=8, label='camera'+str(i+1));
-        ax.legend()
+    ax.set_title('with bundle adjustment(without cameara)')
+    ax.scatter(scale * clean_points_3d[:,0], scale * clean_points_3d[:,1], scale * clean_points_3d[:,2], c=clean_points_3d[:,2], cmap='viridis', linewidth=0.5);
     plt.show()
-    #w,h = lines_imgs[0].shape
-
     
+    print("non bundle:C\n",C)
+    print("bundle:C\n",bundle_C)
+
+
 if __name__== "__main__":
     parser = ArgumentParser()
     parser.add_argument("-img_p", help="image directory", dest="img_dir", default=None)
     parser.add_argument("-calib_p", help="calib directory", dest="calib_dir", default=None)
     parser.add_argument("-t", help="image file type", dest="img_type", default="ppm")
+    parser.add_argument("-scale", help="scale", dest="scale", default=1)
+    parser.add_argument("-debug", help="debug mode on", dest="debug", default=0)
     args = parser.parse_args()
     main(args)
