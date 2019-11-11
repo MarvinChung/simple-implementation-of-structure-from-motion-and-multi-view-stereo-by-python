@@ -152,17 +152,18 @@ def getCombination(imgs):
                 imgs_combination.append([idx_A,img_A,idx_B,img_B])
     return imgs_combination
 
-def DebugShow(img1, img2, train_inliers, query_inliers, matches, kp1, kp2, left_img_with_lines, right_img_with_lines):
+def DebugShow(img1, img2, left_inliers, right_inliers, matches, kp1, kp2, left_img_with_lines, right_img_with_lines):
     
     #draw features on both images   
     fig=plt.figure(figsize=(64, 64))
+    fig.suptitle('features on both images', fontsize=16)
     imageA = img1.copy()
     imageB = img2.copy()
-    for i in train_inliers:
+    for i in left_inliers:
         imageA = cv2.circle(imageA , (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
     fig.add_subplot(1, 2, 1)
     plt.imshow(imageA)
-    for i in query_inliers:
+    for i in right_inliers:
         imageB = cv2.circle(imageB , (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
     fig.add_subplot(1, 2, 2)
     plt.imshow(imageB)
@@ -171,18 +172,20 @@ def DebugShow(img1, img2, train_inliers, query_inliers, matches, kp1, kp2, left_
     #draw matches of both images
     img3 = cv2.drawMatches(imageA, kp1, imageB, kp2, matches, None, flags=2)
     plt.imshow(img3)
+    plt.title("draw matches of both images")
     plt.show()
 
     #draw Epilines and features on both images
     fig=plt.figure(figsize=(64, 64))
+    fig.suptitle('draw Epilines and features on both images')
     fig.add_subplot(1, 2, 1)
     left = left_img_with_lines.copy()
-    for i in train_inliers:
+    for i in left_inliers:
         left = cv2.circle(left, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
     plt.imshow(left,aspect='auto')
     fig.add_subplot(1, 2, 2)
     right = right_img_with_lines.copy()
-    for i in query_inliers:
+    for i in right_inliers:
         right = cv2.circle(right, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
     plt.imshow(right,aspect='auto')
     plt.show()
@@ -225,8 +228,11 @@ def getFeatures(img1, img2, debug):
        
     if len(good_matches) >= MIN_MATCH_COUNT:
         print("good_matches numbers:", len(good_matches))
-        src_pts = np.int32([ kp1[m.queryIdx].pt for m in good_matches ]).reshape(-1,2)
-        dst_pts = np.int32([ kp2[m.trainIdx].pt for m in good_matches ]).reshape(-1,2)
+        #Important: do not use np.int32, this will cause cv2.triangulation bad use and abort trap!!
+        #src_pts = np.int32([ kp1[m.queryIdx].pt for m in good_matches ]).reshape(-1,2)
+        #dst_pts = np.int32([ kp2[m.trainIdx].pt for m in good_matches ]).reshape(-1,2)
+        src_pts = np.float32([ kp1[m.queryIdx].pt for m in good_matches ]).reshape(-1,2)
+        dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good_matches ]).reshape(-1,2)
     else:
         print("Not enough matches are found - %d/%d(at least 8 for findFundamentalMat to apply 8 points algorithm)" % (len(good_matches), MIN_MATCH_COUNT))
         return None, None, 0
@@ -252,16 +258,18 @@ def getFeatures(img1, img2, debug):
     # drawing its lines on right image
     lines2 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 1, F)
     lines2 = lines2.reshape(-1,3)
-    right_img_with_lines, _ = drawlines(img2.copy(),img1.copy(),lines2,query_inliers,train_inliers)
+    right_img_with_lines, _ = drawlines(img2.copy(),img1.copy(),lines2,train_inliers,query_inliers)
     
     if(debug == "1"):
         DebugShow(img1, img2, query_inliers, train_inliers, good_matches, kp1, kp2, left_img_with_lines, right_img_with_lines)
-    
     return query_inliers, train_inliers, len(train_inliers)#, left_img_with_lines, right_img_with_lines
 
 def getProjectionMatrix(K, r, t):
     extrinsic = np.concatenate((r, t), axis=1)
     return K @ extrinsic
+
+def traingulatePoints(P1,P2,query_inliers,train_inliers):
+    return cv2.triangulatePoints(P1,P2,query_inliers.transpose(),train_inliers.transpose()).transpose()
 
 def main2(args):
     scale = args.scale
@@ -272,23 +280,158 @@ def main2(args):
     global_sets = GlobalSets()
     for (idx_A,img_A,idx_B,img_B) in tqdm(imgs_combination, total = len(imgs_combination)):
         query_inliers, train_inliers, inliers_n = getFeatures(img_A, img_B, args.debug)
+        print("inliers_n:",inliers_n)
         if(inliers_n != 0):
             P1 = getProjectionMatrix(par_K[idx_A], par_r[idx_A], par_t[idx_A])
             P2 = getProjectionMatrix(par_K[idx_B], par_r[idx_B], par_t[idx_B])
-            for query_inlier, train_inlier in zip(query_inliers, train_inliers):
-                point = cv2.triangulatePoints(P1,P2,np.array([[query_inlier[0]], [query_inlier[1]]]),np.array([[train_inlier[0]], [train_inlier[1]]])).reshape(-1)
-                if(point[-1] == 0):
+            temp_points_3d = []
+
+            #abort trap in cv2.triangulatePoints = =
+            unnormalized_points = traingulatePoints(P1,P2,query_inliers,train_inliers)
+            for query_inlier, train_inlier, un_point in zip(query_inliers, train_inliers, unnormalized_points):
+                if(un_point[-1] == 0):
                     #don't use this point.
                     #There will be a lot of [0,0,0] but not reasonably inside global_sets
-                    point = 0*point[:-1]
+                    point = 0*un_point[:-1]
                 else:
-                    point = point[:-1]/point[-1]
+                    print("add")
+                    
+                    point = un_point[:-1]/un_point[-1]
+                    if(idx_A >= 48):
+                        print("oh no")
+                        pdb.set_trace()
                     a_set = set([(idx_A, query_inlier[0], query_inlier[1]), (idx_B, train_inlier[0], train_inlier[1])])
                     global_sets.add(a_set, point)
+                    temp_points_3d.append(point)
                     #print(global_sets.sets_list)
+                    #print(len(global_sets.sets_list))
                     #input("")
+                print(point)
+            print(len(temp_points_3d))
+            if(args.debug==1):
+                ax = plt.axes(projection='3d')
+                ax.set_title('without bundle adjustment temp points')
+                ax.scatter(scale * np.array(temp_points_3d)[:,0], scale * np.array(temp_points_3d)[:,1], scale * np.array(temp_points_3d)[:,2], c=np.array(temp_points_3d)[:,2], cmap='viridis', linewidth=0.5);
+                plt.show()
             
-    print(len(global_sets.sets_list))
+    print("len(global_sets_list)",len(global_sets.sets_list))
+    
+    #Bundle adjustment
+    n_observations = global_sets.get_n_observations()
+    n_cameras = len(imgs)
+    n_points = len(global_sets.sets_list)
+    
+    camera_indices = np.empty(n_observations, dtype=int)
+    point_indices = np.empty(n_observations, dtype=int)
+    points_2d = np.empty((n_observations, 2))
+    points_3d = np.empty((n_points, 3))
+    
+    legal_sets = []
+    legal_points = []
+    
+    for ct,i in enumerate(global_sets.sets_list):
+        if(global_sets.mask_list[ct] == 1):
+            legal_sets.append(i)
+            legal_points.append(global_sets.world_points[ct])
+    
+    ct = 0
+    for point_index, (observation, world_point) in enumerate(zip(legal_sets,legal_points)):
+        points_3d[point_index] = world_point
+        
+        print(world_point)
+        #These point2ds are correspond to a 3d point
+        for point2d_tuple in observation:
+            #image_index is same as camera index
+            #point2d_tuple: (image_index, x, y)
+            print(point2d_tuple[0])
+            if(point2d_tuple[0] >= n_cameras):
+                pdb.set_trace()
+            camera_indices[ct] = point2d_tuple[0]
+            point_indices[ct] = point_index
+            points_2d[ct] = [float(point2d_tuple[1]), float(point2d_tuple[2])]
+            ct += 1
+    
+    
+    ax = plt.axes(projection='3d')
+    ax.set_title('without bundle adjustment')
+    ax.scatter(scale * points_3d[:,0], scale * points_3d[:,1], scale * points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.5);
+    plt.show()
+    
+    
+#     print("points_3d points:",len(points_3d))
+#     #remove extreme value
+#     points_3d = np.array(points_3d) 
+#     Percentile = np.percentile(points_3d,[0,25,50,75,100],axis=0)
+#     IQR = Percentile[3] - Percentile[1]
+#     UpLimit = Percentile[3] + IQR*1.5
+#     DownLimit = Percentile[1] - IQR*1.5
+    
+#     clean_points_3d = []
+#     for i in points_3d:
+#         print(i)
+#         print(DownLimit)
+#         if(i[0] >= DownLimit[0] and i[1] >= DownLimit[1] and i[2] >= DownLimit[2] and i[0] <= UpLimit[0] and i[1] <= UpLimit[1] and i[2] <= UpLimit[2]):
+#             clean_points_3d.append(i)
+    
+#     clean_points_3d = np.array(clean_points_3d)
+#     print("clean_points_3d points:",len(clean_points_3d))
+    
+#     ax = plt.axes(projection='3d')
+#     ax.set_title('with bundle adjustment(with cameara)')
+#     ax.scatter(scale * clean_points_3d[:,0], scale * clean_points_3d[:,1], scale * clean_points_3d[:,2], c=clean_points_3d[:,2], cmap='viridis', linewidth=0.5);
+#     plt.show()
+            
+    camera_params = np.empty((n_cameras, 9))
+    for i in range(n_cameras):
+        rvec, jacobian = cv2.Rodrigues(par_r[i])
+        #rotation vector, translation vector, then a focal distance and two distortion parameters
+        camera_params[i] = np.array([rvec[0][0],rvec[1][0],rvec[2][0],par_t[i][0][0],par_t[i][1][0],par_t[i][2][0],(par_K[i][0][0]+par_K[i][1][1])/2,0.0,0.0])
+        print(rvec)
+    
+    n = 9 * n_cameras + 3 * n_points
+    m = 2 * points_2d.shape[0]
+    
+    print("n_cameras: {}".format(n_cameras))
+    print("n_points: {}".format(n_points))
+    print("Total number of parameters: {}".format(n))
+    print("Total number of residuals: {}".format(m))
+    print(camera_params[0])
+    x0 = np.hstack((camera_params.ravel(), points_3d.ravel()))
+    #f0 = fun(x0, n_cameras, n_points, camera_indices, point_indices, points_2d)
+    A = bundle_adjustment_sparsity(n_cameras, n_points, camera_indices, point_indices)
+    t0 = time.time()
+    res = least_squares(fun, x0, jac_sparsity=A, verbose=2, x_scale='jac', ftol=1e-4, method='trf',
+                    args=(n_cameras, n_points, camera_indices, point_indices, points_2d))
+    t1 = time.time()
+    print("Optimization took {0:.0f} seconds".format(t1 - t0))
+
+    #No need to refine camera_params
+    #camera_params = res.x[:n_cameras * 9].reshape((n_cameras, 9))
+    points_3d = res.x[n_cameras * 9:].reshape((n_points, 3))
+    
+    ax = plt.axes(projection='3d')
+    ax.set_title('with bundle adjustment')
+    ax.scatter(scale * points_3d[:,0], scale * points_3d[:,1], scale * points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.5);
+    plt.show()
+    
+#     print("points_3d points:",len(points_3d))
+#     #remove extreme value
+#     Percentile = np.percentile(points_3d,[0,25,50,75,100],axis=0)
+#     IQR = Percentile[3] - Percentile[1]
+#     UpLimit = Percentile[3] + IQR*1.5
+#     DownLimit = Percentile[1] - IQR*1.5
+    
+#     clean_points_3d = []
+#     for i in points_3d:
+#         if(i[0] >= DownLimit[0] and i[1] >= DownLimit[1] and i[2] >= DownLimit[2] and i[0] <= UpLimit[0] and i[1] <= UpLimit[1] and i[2] <= UpLimit[2]):
+#             clean_points_3d.append(i)
+    
+#     clean_points_3d = np.array(clean_points_3d)
+#     print("clean_points_3d points:",len(clean_points_3d))
+    
+#     ax = plt.axes(projection='3d')
+#     ax.set_title('with bundle adjustment(with cameara)')
+#     ax.scatter(scale * clean_points_3d[:,0], scale * clean_points_3d[:,1], scale * clean_points_3d[:,2], c=clean_points_3d[:,2], cmap='viridis', linewidth=0.5);
 
 # def main(args):
     
