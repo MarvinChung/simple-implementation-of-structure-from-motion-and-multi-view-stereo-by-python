@@ -146,10 +146,21 @@ def getCombination(imgs):
         C(n,2) of input imgs   
     """
     imgs_combination = []
-#     for idx_A, img_A in enumerate(imgs):
-#         for idx_B, img_B in enumerate(imgs):
-#             if(idx_A != idx_B):
-#                 imgs_combination.append([idx_A,img_A,idx_B,img_B])
+    for idx_A, img_A in enumerate(imgs):
+        for idx_B, img_B in enumerate(imgs):
+            if(idx_A != idx_B):
+                imgs_combination.append([idx_A,img_A,idx_B,img_B])
+
+    return imgs_combination
+
+def getSequence(imgs):
+    """
+    input: list
+        imgs                    
+    Returns: list
+        n-1 of imgs  
+    """
+    imgs_combination = []
 
     for i, img in enumerate(imgs):
         if(i!=0):
@@ -291,7 +302,8 @@ def main2(args):
     imgs = read_imgs(args)
     #3 dictionary
     par_K, par_r, par_t = read_pars(args)
-    imgs_combination = getCombination(imgs)
+    #imgs_combination = getCombination(imgs)
+    imgs_combination = getSequence(imgs)
     global_sets = GlobalSets()
     for (idx_A,img_A,idx_B,img_B) in tqdm(imgs_combination, total = len(imgs_combination)):
         query_inliers, train_inliers, inliers_n = getFeatures(img_A, img_B, args.debug)
