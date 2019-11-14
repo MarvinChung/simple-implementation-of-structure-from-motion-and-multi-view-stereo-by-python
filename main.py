@@ -146,13 +146,18 @@ def getCombination(imgs):
         C(n,2) of input imgs   
     """
     imgs_combination = []
-    for idx_A, img_A in enumerate(imgs):
-        for idx_B, img_B in enumerate(imgs):
-            if(idx_A != idx_B):
-                imgs_combination.append([idx_A,img_A,idx_B,img_B])
+#     for idx_A, img_A in enumerate(imgs):
+#         for idx_B, img_B in enumerate(imgs):
+#             if(idx_A != idx_B):
+#                 imgs_combination.append([idx_A,img_A,idx_B,img_B])
+
+    for i, img in enumerate(imgs):
+        if(i!=0):
+            imgs_combination.append([i-1,pre_img,i,img])
+        pre_img = img
     return imgs_combination
 
-def DebugShow(img1, img2, left_inliers, right_inliers, matches, kp1, kp2, left_img_with_lines, right_img_with_lines):
+def DebugShow(img1, img2, left_inliers, right_inliers, matches, kp1, kp2, lines1, lines2):
     
     #draw features on both images   
     fig=plt.figure(figsize=(64, 64))
@@ -176,18 +181,28 @@ def DebugShow(img1, img2, left_inliers, right_inliers, matches, kp1, kp2, left_i
     plt.show()
 
     #draw Epilines and features on both images
+    
+    left_img_with_lines, right_img = drawlines(img1.copy(),img2.copy(),lines1,left_inliers,right_inliers)
+    right_img_with_lines, left_img = drawlines(img2.copy(),img1.copy(),lines2,right_inliers,left_inliers)
+    
     fig=plt.figure(figsize=(64, 64))
-    fig.suptitle('draw Epilines and features on both images')
+    fig.suptitle('draw Epilines on both images(first)')
     fig.add_subplot(1, 2, 1)
-    left = left_img_with_lines.copy()
-    for i in left_inliers:
-        left = cv2.circle(left, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
-    plt.imshow(left,aspect='auto')
+#     for i in left_inliers:
+#         left = cv2.circle(left, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
+    plt.imshow(left_img_with_lines,aspect='auto')
     fig.add_subplot(1, 2, 2)
-    right = right_img_with_lines.copy()
-    for i in right_inliers:
-        right = cv2.circle(right, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
-    plt.imshow(right,aspect='auto')
+    plt.imshow(right_img,aspect='auto')
+    plt.show()
+    
+    fig=plt.figure(figsize=(64, 64))
+    fig.suptitle('draw Epilines on both images(second)')
+    fig.add_subplot(1, 2, 1)
+#     for i in right_inliers:
+#         right = cv2.circle(right, (int(i[0]), int(i[1])), 1, (255, 0, 0), 10)
+    plt.imshow(right_img_with_lines,aspect='auto')
+    fig.add_subplot(1, 2, 2)
+    plt.imshow(left_img,aspect='auto')
     plt.show()
 
 
@@ -200,8 +215,8 @@ def getFeatures(img1, img2, debug):
     #Oriented FAST and Rotated BRIEF
     orb = cv2.ORB_create(edgeThreshold=3, nfeatures=1000)
     # find the keypoints with ORB
-    kp1, des1 = orb.detectAndCompute(img1,None)
-    kp2, des2 = orb.detectAndCompute(img2,None)
+    kp1, des1 = orb.detectAndCompute(img1,None) #query image
+    kp2, des2 = orb.detectAndCompute(img2,None) #train image
     
     #in order to prevent error from flann.knnMatch
     des1 = np.float32(des1)
@@ -252,16 +267,16 @@ def getFeatures(img1, img2, debug):
     # drawing its lines on left image
     lines1 = cv2.computeCorrespondEpilines(train_inliers.reshape(-1,1,2), 2, F)
     lines1 = lines1.reshape(-1,3)
-    left_img_with_lines, _ = drawlines(img1.copy(),img2.copy(),lines1,query_inliers,train_inliers)
+    
     
     # Find epilines corresponding to points in left image (first image) and
     # drawing its lines on right image
     lines2 = cv2.computeCorrespondEpilines(query_inliers.reshape(-1,1,2), 1, F)
     lines2 = lines2.reshape(-1,3)
-    right_img_with_lines, _ = drawlines(img2.copy(),img1.copy(),lines2,train_inliers,query_inliers)
+
     
     if(debug == "1"):
-        DebugShow(img1, img2, query_inliers, train_inliers, good_matches, kp1, kp2, left_img_with_lines, right_img_with_lines)
+        DebugShow(img1, img2, query_inliers, train_inliers, good_matches, kp1, kp2, lines1, lines2)
     return query_inliers, train_inliers, len(train_inliers)#, left_img_with_lines, right_img_with_lines
 
 def getProjectionMatrix(K, r, t):
@@ -272,7 +287,7 @@ def traingulatePoints(P1,P2,query_inliers,train_inliers):
     return cv2.triangulatePoints(P1,P2,query_inliers.transpose(),train_inliers.transpose()).transpose()
 
 def main2(args):
-    scale = args.scale
+    scale = int(args.scale)
     imgs = read_imgs(args)
     #3 dictionary
     par_K, par_r, par_t = read_pars(args)
@@ -317,15 +332,6 @@ def main2(args):
     print("len(global_sets_list)",len(global_sets.sets_list))
     
     #Bundle adjustment
-    n_observations = global_sets.get_n_observations()
-    n_cameras = len(imgs)
-    n_points = len(global_sets.sets_list)
-    
-    camera_indices = np.empty(n_observations, dtype=int)
-    point_indices = np.empty(n_observations, dtype=int)
-    points_2d = np.empty((n_observations, 2))
-    points_3d = np.empty((n_points, 3))
-    
     legal_sets = []
     legal_points = []
     
@@ -333,6 +339,15 @@ def main2(args):
         if(global_sets.mask_list[ct] == 1):
             legal_sets.append(i)
             legal_points.append(global_sets.world_points[ct])
+            
+    n_observations = global_sets.get_n_observations()
+    n_cameras = len(imgs)
+    n_points = len(legal_points)
+    
+    camera_indices = np.empty(n_observations, dtype=int)
+    point_indices = np.empty(n_observations, dtype=int)
+    points_2d = np.empty((n_observations, 2))
+    points_3d = np.empty((n_points, 3))    
     
     ct = 0
     for point_index, (observation, world_point) in enumerate(zip(legal_sets,legal_points)):
@@ -343,14 +358,13 @@ def main2(args):
         for point2d_tuple in observation:
             #image_index is same as camera index
             #point2d_tuple: (image_index, x, y)
-            print(point2d_tuple[0])
+            #print(point2d_tuple[0])
             if(point2d_tuple[0] >= n_cameras):
                 pdb.set_trace()
             camera_indices[ct] = point2d_tuple[0]
             point_indices[ct] = point_index
             points_2d[ct] = [float(point2d_tuple[1]), float(point2d_tuple[2])]
             ct += 1
-    
     
     ax = plt.axes(projection='3d')
     ax.set_title('without bundle adjustment')
@@ -386,7 +400,6 @@ def main2(args):
         rvec, jacobian = cv2.Rodrigues(par_r[i])
         #rotation vector, translation vector, then a focal distance and two distortion parameters
         camera_params[i] = np.array([rvec[0][0],rvec[1][0],rvec[2][0],par_t[i][0][0],par_t[i][1][0],par_t[i][2][0],(par_K[i][0][0]+par_K[i][1][1])/2,0.0,0.0])
-        print(rvec)
     
     n = 9 * n_cameras + 3 * n_points
     m = 2 * points_2d.shape[0]
