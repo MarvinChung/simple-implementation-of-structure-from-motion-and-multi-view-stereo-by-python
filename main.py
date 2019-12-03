@@ -264,7 +264,7 @@ def getFeatures(img1, img2, debug):
         
         
     #use opencv findFundamentalMat input shape: 2xN/Nx2
-    F, mask = cv2.findFundamentalMat(src_pts, dst_pts, cv2.FM_LMEDS)#cv2.FM_RANSAC)
+    F, mask = cv2.findFundamentalMat(src_pts, dst_pts, cv2.FM_RANSAC)#cv2.FM_LMEDS)#
     if F is not None:
         query_inliers = src_pts[mask.ravel()==1]       
         train_inliers = dst_pts[mask.ravel()==1]
@@ -290,7 +290,13 @@ def getProjectionMatrix(K, r, t):
 def traingulatePoints(P1,P2,query_inliers,train_inliers):
     return cv2.triangulatePoints(P1,P2,query_inliers.transpose(),train_inliers.transpose()).transpose()
 
-def main2(args, threshold = 0.01):
+def projectPoint(point, par_r, par_t, par_K):
+    rvec, jacobian = cv2.Rodrigues(par_r)
+    out, jacobian = cv2.projectPoints(point, rvec, par_t, par_K, None)
+    return out.ravel()
+        
+
+def main2(args, threshold = 0.01, MIN_REPROJECTION_ERROR = 0.3):
     scale = args.scale
     imgs = read_imgs(args)
     #3 dictionary
@@ -301,49 +307,65 @@ def main2(args, threshold = 0.01):
     else:
         imgs_combination = getCombination(imgs)
     global_set = GlobalSet(threshold = threshold)
-    for (idx_A,img_A,idx_B,img_B) in tqdm(imgs_combination, total = len(imgs_combination)):
+    for ct, (idx_A,img_A,idx_B,img_B) in enumerate(tqdm(imgs_combination, total = len(imgs_combination))):
         query_inliers, train_inliers, inliers_n = getFeatures(img_A, img_B, args.debug)
         print("inliers_n:",inliers_n)
         if(inliers_n != 0):
             P1 = getProjectionMatrix(par_K[idx_A], par_r[idx_A], par_t[idx_A])
             P2 = getProjectionMatrix(par_K[idx_B], par_r[idx_B], par_t[idx_B])
-            temp_global_set = GlobalSet()
+            #temp_global_set = GlobalSet()
 
-            #abort trap in cv2.triangulatePoints = =
-            unnormalized_points = traingulatePoints(P1,P2,query_inliers,train_inliers)
-            for query_inlier, train_inlier, un_point in zip(query_inliers, train_inliers, unnormalized_points):
+            #abort trap in cv2.triangulatePoints if query_inliers or train_inliers are type int
+            points = traingulatePoints(P1,P2,query_inliers,train_inliers) 
+#{
+#             ##normalized however get strange results
+#             normalized query inliers and train_inliers in normalized image coordinates(-1 ~ 1)
+#             normalized_query_inliers = cv2.undistortPoints(query_inliers, par_K[idx_A], None).reshape(-1,2)
+#             normalized_train_inliers = cv2.undistortPoints(train_inliers, par_K[idx_B], None).reshape(-1,2)            
+#             unnormalized_points = traingulatePoints(P1,P2,normalized_query_inliers,normalized_train_inliers)
+#   
+#             for query_inlier, train_inlier, un_point in zip(normalized_query_inliers, normalized_train_inliers, unnormalized_points):
+#}
+             
+            for query_inlier, train_inlier, un_point in zip(query_inliers, train_inliers, points):
                 if(un_point[-1] == 0):
                     #don't use this point.
                     #There will be a lot of [0,0,0] but not reasonably inside global_set
                     point = 0*un_point[:-1]
                 else:                    
                     point = un_point[:-1]/un_point[-1]
-                    a_list = [(idx_A, query_inlier[0], query_inlier[1]), (idx_B, train_inlier[0], train_inlier[1])]
-                    #global_set.add(a_set, np.array([round(point[0],5), round(point[1],5), round(point[2],5)]))
-                    global_set.add(a_list, point)
+                    print("hmm")
+                    print(np.linalg.norm(projectPoint(point, par_r[idx_A], par_t[idx_A], par_K[idx_A]) - query_inlier))
+                    print(np.linalg.norm(projectPoint(point, par_r[idx_B], par_t[idx_B], par_K[idx_B]) - train_inlier))
+                    if (np.linalg.norm(projectPoint(point, par_r[idx_A], par_t[idx_A], par_K[idx_A]) - query_inlier) > MIN_REPROJECTION_ERROR or np.linalg.norm(projectPoint(point, par_r[idx_B], par_t[idx_B], par_K[idx_B]) - train_inlier) > MIN_REPROJECTION_ERROR):
+                        continue
                     
-                    if(args.debug == 1):
-                        print(point)
-                        temp_a_list = [(0, query_inlier[0], query_inlier[1]), (1, train_inlier[0], train_inlier[1])]
-                        #temp_global_set.add(temp_a_set, np.array([round(point[0],2), round(point[1],2), round(point[2],2)]))
-                        temp_global_set.add(temp_a_list, point)
+                    a_list = [(idx_A, query_inlier[0], query_inlier[1]), (idx_B, train_inlier[0], train_inlier[1])]
+                    global_set.add2pts(a_list, point)
+                    
+#                     if(args.debug == 1):
+#                         print(point)
+#                         temp_a_list = [(0, query_inlier[0], query_inlier[1]), (1, train_inlier[0], train_inlier[1])]
+#                         temp_global_set.add2pts(temp_a_list, point)
 
-            if(args.debug == 1):
-                DrawPointClouds(temp_global_set, 2, scale, {0:par_K[idx_A], 1:par_K[idx_B]}, {0:par_r[idx_A], 1:par_r[idx_B]}, {0:par_t[idx_A], 1:par_t[idx_B]}, args.debug)
+            #if(args.debug == 1):
+                #DrawPointClouds(temp_global_set, 2, scale, {0:par_K[idx_A], 1:par_K[idx_B]}, {0:par_r[idx_A], 1:par_r[idx_B]}, {0:par_t[idx_A], 1:par_t[idx_B]}, args.debug)
+            print(global_set.show_list())
+            DrawPointClouds(global_set, ct+2, scale, par_K, par_r, par_t, debug = args.debug, show = ct==(len(imgs_combination)-1))
 
                 
                 
             
-    DrawPointClouds(global_set, len(imgs), scale, par_K, par_r, par_t, args.debug)
-    
+    #DrawPointClouds(global_set, len(imgs), scale, par_K, par_r, par_t, args.debug)
 
-def DrawPointClouds(global_set, n_cameras, scale, par_K, par_r, par_t, debug="0"):
+def DrawPointClouds(global_set, n_cameras, scale, par_K, par_r, par_t, debug=0, show = False):
     """
     n_camera is same as len(imgs) 
     """
     
     #Bundle adjustment
     n_observations, n_world_points, legal_sets = global_set.getInfo()
+    print("len:",n_world_points)
     n_points= n_world_points
     
     camera_indices = np.empty(n_observations, dtype=int)
@@ -351,11 +373,15 @@ def DrawPointClouds(global_set, n_cameras, scale, par_K, par_r, par_t, debug="0"
     points_2d = np.empty((n_observations, 2))
     points_3d = np.empty((n_points, 3))    
     
+    draw_points = []
+    draw_color = []
+    
     ct = 0
     for point_index, legal_set in enumerate(legal_sets):
         points_3d[point_index] = np.asarray(legal_set.world_point)
         
-        print(points_3d[point_index])
+        draw_points.append(list(legal_set.world_point))
+        draw_color.append('blue')
         #These point2ds are correspond to a 3d point
         for point2d_tuple in legal_set.point2d_list:
             #image_index is same as camera index
@@ -371,21 +397,42 @@ def DrawPointClouds(global_set, n_cameras, scale, par_K, par_r, par_t, debug="0"
             
     assert(ct == n_observations)
     
-    ax = plt.axes(projection='3d')
-    ax.set_title('without bundle adjustment')
-    ax.scatter(scale * points_3d[:,0], scale * points_3d[:,1], scale * points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.1);
-    plt.show()
+    #add camera position
+    if show == True:
+#         for i in range(len(par_t)):
+#             draw_points.append(-(par_r[i].transpose()@par_t[i]).ravel())
+#             draw_color.append('pink')
+
+        ax = plt.axes(projection='3d')
+        ax.set_title('without bundle adjustment')
+        ax.scatter(scale * np.array(draw_points)[:,0], scale * np.array(draw_points)[:,1], scale * np.array(draw_points)[:,2], c=draw_color, cmap='viridis', linewidth=0.1);
+
+        plt.show()
     
     
-    camera_params = np.empty((n_cameras, 9))
+    camera_params = np.empty((n_cameras, 11))
     for i in range(n_cameras):
         rvec, jacobian = cv2.Rodrigues(par_r[i])
         #rotation vector, translation vector, then a focal distance and two distortion parameters
         #Note that the images have been corrected to remove radial distortion.
-        camera_params[i] = np.array([rvec[0][0],rvec[1][0],rvec[2][0],par_t[i][0][0],par_t[i][1][0],par_t[i][2][0],(par_K[i][0][0]+par_K[i][1][1])/2,0.0,0.0])
+        camera_params[i] = np.array([rvec[0][0],rvec[1][0],rvec[2][0],par_t[i][0][0],par_t[i][1][0],par_t[i][2][0],(par_K[i][0][0]+par_K[i][1][1])/2,0.0,0.0,par_K[i][0][2],par_K[i][1][2]])
     
-    n = 9 * n_cameras + 3 * n_points
+    n = 11 * n_cameras + 3 * n_points
     m = 2 * points_2d.shape[0]
+    
+    
+    
+#     for point_index, legal_set in enumerate(legal_sets[:5]):
+#         points_3d[point_index] = np.asarray(legal_set.world_point)
+        
+#         print("3d point",points_3d[point_index])
+        
+#         #These point2ds are correspond to a 3d point
+#         for point2d_tuple in legal_set.point2d_list:
+#             P = getProjectionMatrix(par_K[point2d_tuple[0]], par_r[point2d_tuple[0]], par_t[point2d_tuple[0]])
+#             print(point2d_tuple)
+#             temp = P@np.concatenate((points_3d[point_index],np.array([1])), axis=0).reshape(4,-1)
+#             print("project to",temp[:2]/temp[-1])
     
     print("n_cameras: {}".format(n_cameras))
     print("n_points: {}".format(n_points))
@@ -402,21 +449,36 @@ def DrawPointClouds(global_set, n_cameras, scale, par_K, par_r, par_t, debug="0"
     print("Optimization took {0:.0f} seconds".format(t1 - t0))
 
     #No need to refine camera_params
-    #camera_params = res.x[:n_cameras * 9].reshape((n_cameras, 9))
-    points_3d = res.x[n_cameras * 9:].reshape((n_points, 3))
-    
-    ax = plt.axes(projection='3d')
-    ax.set_title('with bundle adjustment')
-    ax.scatter(scale * points_3d[:,0], scale * points_3d[:,1], scale * points_3d[:,2], c=points_3d[:,2], cmap='viridis', linewidth=0.1);
-    plt.show()
-    print("bundle points")
-    print(points_3d)
+    #camera_params = res.x[:n_cameras * 11].reshape((n_cameras, 11))
+    points_3d = res.x[n_cameras * 11:].reshape((n_points, 3))
+    draw_points = list(points_3d)
+    draw_color = ['blue' for i in range(len(draw_points))]
+    if show == True:
+        #add camera position
+#         for i in range(n_cameras):
+#             refine_par_t = res.x[i*11+3:i*11+6]
+#             refine_par_r, jacobian = cv2.Rodrigues(res.x[i*11:i*11+3])
+#             draw_points.append(-(refine_par_r.transpose() @ refine_par_t.reshape(3,-1)).ravel())
+#             draw_color.append('pink')
+
+        ax = plt.axes(projection='3d')
+        ax.set_title('with bundle adjustment')
+        ax.scatter(scale * np.array(draw_points)[:,0], scale * np.array(draw_points)[:,1], scale * np.array(draw_points)[:,2], c=draw_color, cmap='viridis', linewidth=0.1);
+        plt.show()
+        print("bundle points")
+        print(points_3d)
     
     for i in range(n_cameras):
         print("original camera_pars")
         print(camera_params[i])
         print("after")
-        print(res.x[i*9:i*9+9])
+        print(res.x[i*11:i*11+11])
+        
+    #update_global_set
+    for point_index, legal_set in enumerate(legal_sets):
+        legal_set.world_point = points_3d[point_index]
+        
+    
     
 
     

@@ -26,6 +26,13 @@ class GlobalSet(object):
         self.set_index = {}
         self.list_ct = 0
         self.threshold = threshold
+        
+    def clear(self):
+        self.valid.clear()
+        self.set_list.clear()
+        self.set_index.clear()
+        self.list_ct = 0
+        
     def getInfo(self):
         """
         return the number of 2d points(n_observations), n_points3d, legal sets
@@ -51,6 +58,11 @@ class GlobalSet(object):
 #                 n_observations += len(self.set_list[i].point2d_list)
 #         return n_observations
     
+    def show_list(self):
+        for i in self.set_list.values():
+            print(i.world_point,i.point2d_list)
+    
+    
     def check_threshold(self, set_idx, b):
         try:
             a = self.set_list[set_idx].world_point
@@ -59,7 +71,27 @@ class GlobalSet(object):
             pdb.set_trace()
         return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2 + (a[2] - b[2])**2) < self.threshold
     
-    def add(self, a_list, a_3d_point):
+    def add(self, a_2d_point, a_3d_point):
+        """
+        a_2d_point is a tuple
+        """
+        try:
+            idx = self.set_index[a_2d_point]
+        except KeyError:
+            idx = -1
+        if(idx != -1):
+            self.set_list[self.list_ct] = MySet(a_3d_point, list(a_2d_point))
+            self.valid[self.list_ct] = True
+            self.list_ct+=1
+        else:
+            if(self.valid[idx] and self.check_threshold(idx, a_3d_point)):
+                self.set_index[a_2d_point] = idx
+                self.set_list[idx].union(a_3d_point, list(a_2d_point))
+            else:
+                #not in threshold, discard this set
+                self.valid[idx] = False
+            
+    def add2pts(self, a_list, a_3d_point):
         """
         a_list should be python list type
         Input form:
@@ -79,6 +111,10 @@ class GlobalSet(object):
                 ,(1,xn,yn), (2,x'n,y'n)]
         Then main program is handling image 1,3
         The set [(1, x1, y1), (3, x2, y2)] should be added in.
+        
+        self.valid = False:
+            Every 2d point pair should point to a 3d point. If they should be in a same set, there 3d point should not be 
+            too far away. If their 3d points distance is not inside the threshold, discard this set.
         """
         try:
             idx1 = self.set_index[a_list[0]]
