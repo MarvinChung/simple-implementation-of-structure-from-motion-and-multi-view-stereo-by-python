@@ -4,6 +4,13 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import pdb
+import multiprocessing
+from multiprocessing import Process
+
+def wrapper(func, id ,args, return_dict):
+    print("in wrapper")
+    return_dict[id] = func(*args)
 
 
 def Match(desc1, desc2, threshold=0.5): 
@@ -16,8 +23,13 @@ def Match(desc1, desc2, threshold=0.5):
         for j in range(len(desc2)): 
             d1 = (desc1[i]-np.mean(desc1[i]))/np.std(desc1[i]) 
             d2 = (desc2[j]-np.mean(desc2[j]))/np.std(desc2[j]) 
-            ncc_value = sum(d1*d2)/(n_pixels - 1)
-            #print(ncc_value)
+            try:
+                ncc_value = sum(d1*d2)/(n_pixels - 1)
+            except:
+                print("[debug]Match")
+                print(d1)
+                print(d2)
+                pdb.set_trace()
             if ncc_value > threshold: 
                 dist[i,j] = ncc_value 
     ndx = np.argsort(-dist) 
@@ -28,8 +40,21 @@ def Match(desc1, desc2, threshold=0.5):
 def MatchTwoSided(desc1,desc2,threshold=0.5): 
     """two sided symmetric version of match."""
     print("MatchTwoSided")
-    matches_12 = Match(desc1, desc2, threshold) 
-    matches_21 = Match(desc2, desc1, threshold) 
+    manager = multiprocessing.Manager()
+    return_dict = manager.dict()
+    p1 = Process(target = wrapper, args=(Match, 0, (desc1, desc2, threshold), return_dict))
+    p2 = Process(target = wrapper, args=(Match, 1, (desc2, desc1, threshold), return_dict))
+    p1.start()
+    p2.start()
+    p1.join()
+    p2.join()
+    matches_12 = return_dict[0]
+    matches_21 = return_dict[1]
+
+    print('finish thread')
+    print(len(matches_21))
+    #matches_12 = Match(desc1, desc2, threshold) 
+    #matches_21 = Match(desc2, desc1, threshold) 
     ndx_12 = np.where(matches_12 >= 0)[0] 
     
     # remove matches that are not symmetric 
@@ -85,12 +110,17 @@ def getMatches(im1, im2, locs1, locs2, matchscores, show_below=True):
     return np.int32(src_pts), np.int32(dst_pts), np.array(match_scores)
 
 def getDescFeatures(image, filter_coords, wid=5): 
-    """For each point return pixel values around the point using a neihborhood of 2*width+1.""" 
+    """
+    For each point return pixel values around the point using a neihborhood of 2*width+1.
+    Important:
+        coords[0] - wid should not be less than 0 either coords[1] - wid
+        The image should be expand to at least (i+2*width+1, j+2*width+1 ,3) shape
+    """ 
     print("getDescPatches")
     desc = []
     for coords in filter_coords: 
-        patch = image[coords[0]-wid:coords[0]+wid+1, coords[1]-wid:coords[1]+wid+1].flatten() 
-        desc.append(patch) # use append to add new elements return desc
+        patch = image[coords[0]-wid:coords[0]+wid+1, coords[1]-wid:coords[1]+wid+1] 
+        desc.append(patch.flatten()) # use append to add new elements return desc
     return desc
                 
 def getHarrisPoints(input_img, debug = False):

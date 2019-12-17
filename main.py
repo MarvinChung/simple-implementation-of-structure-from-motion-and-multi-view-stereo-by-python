@@ -6,7 +6,7 @@ import cv2
 import glob, os
 from mpl_toolkits import mplot3d
 
-from Normalized8pointsAlgo import RANSAC
+#from Normalized8pointsAlgo import RANSAC
 from CameraConfig import *
 #from Triangulation import *
 import matplotlib.cm as cm
@@ -358,7 +358,7 @@ import heapq
 
 class MyMatchHeap(object):
     #add negative for max heap
-    def __init__(self, initial=None, key=lambda x:-x.ncc_score):
+    def __init__(self, initial=None, key=lambda x:(-x.ncc_score, x.src_point[0], x.src_point[1], x.dst_point[0], x.dst_point[1])):
         self.key = key
         if initial:
             self._data = [(key(item), item) for item in initial]
@@ -379,7 +379,7 @@ class MyMatch(object):
     def __init__(self, src_point, dst_point, ncc_score):
         self.ncc_score = ncc_score
         self.src_point = src_point
-        self.dst_point = src_point
+        self.dst_point = dst_point
 
 def ctNcc(desc1, desc2):
     n_pixels = len(desc1)
@@ -390,27 +390,37 @@ def ctNcc(desc1, desc2):
 def DensePointsWithMVS(imgs, args):
     par_K, par_r, par_t = read_pars(args)
     debug = args.debug
-    
-    harris_features = []
-    for img in imgs[:2]:
-        harris_features.append(getHarrisPoints(img, debug = True))
-    
     wid = 5
+    harris_features = []
+    cutoff = 2
+
+    for img in imgs[:cutoff]:
+        #expand space of the image for wid
+        expand_img = np.zeros((img.shape[0]+wid+1, img.shape[1]+wid+1, img.shape[2]), dtype='uint8')
+        for i in range(wid+1, img.shape[0]):
+            for j in range(wid+1, img.shape[1]):
+                expand_img[i,j,:] = img[i-wid-1, j-wid-1, :]
+        img = expand_img
+        harris_features.append(getHarrisPoints(img, debug = debug))
+    
+    
     threshold = 0.5
     scale = args.scale
 
+    refined_src_features = []
+    refined_dst_features = []
     
-    for idx_A,img in enumerate(imgs[:2]):
+    for idx_A,img in enumerate(imgs[:cutoff]):
         filtered_coords1 = harris_features[idx_A]
-        for idx_B,cmp_img in enumerate(imgs[:2]):
-            refined_src_features = []
-            refined_dst_features = []
+        for idx_B,cmp_img in enumerate(imgs[:cutoff]):
+            print(idx_A, idx_B)
             if(idx_A != idx_B):        
                 filtered_coords2 = harris_features[idx_B]
                                
                 d1 = getDescFeatures(img, filtered_coords1, wid) 
                 d2 = getDescFeatures(cmp_img, filtered_coords2, wid) 
                 
+                #method1
                 #the output matches have a threshold for NCC score which ensure photo consistency
                 matches = MatchTwoSided(d1, d2, threshold = threshold)
                 
@@ -428,6 +438,10 @@ def DensePointsWithMVS(imgs, args):
                     for s,d,c in zip(src_inliers, dst_inliers, ncc_inliers):
                         src_is_seen[(s[0],s[1])] = True
                         dst_is_seen[(d[0],d[1])] = True
+                        # print(s,d,c)
+                        # s array([447,  22], dtype=int32)
+                        # d array([443,  16], dtype=int32)
+                        # c 1
                         heap.push(MyMatch(s,d,c))
                         
                     if debug:
@@ -444,7 +458,24 @@ def DensePointsWithMVS(imgs, args):
                     print("F is none")
                     raise RuntimeError
                 
-
+                """       
+                #method2
+                heap = MyMatchHeap()
+                src_is_seen = {}
+                dst_is_seen = {}
+                match_scores = Match(d1, d2, threshold=0.5)
+                for i,m in enumerate(match_scores): 
+                    if m>0:
+                        s = np.array([filtered_coords1[i][1],filtered_coords1[i][0]])
+                        d = np.array([filtered_coords2[m][1],filtered_coords2[m][0]])
+                        src_is_seen[(s[0],s[1])] = True
+                        dst_is_seen[(d[0],d[1])] = True
+                        #try:
+                        print(s,d,m)
+                        heap.push(MyMatch(s,d,m))
+                        #except:
+                        #    pdb.set_trace()
+                """
                     
                 while(heap.size() != 0):
                     match_obj = heap.pop()
@@ -465,14 +496,17 @@ def DensePointsWithMVS(imgs, args):
                     dst_max_y = min(cmp_img.shape[1]-1,dst_point[1] + wid)
                     #Add new potential matches in their immediate spatial neighborhood into heap
                     for i in range(src_min_x, src_max_x):
-                        for j in range(src_max_y, src_max_y):
+                        for j in range(src_min_y, src_max_y):
                             if(src_is_seen[(i,j)]== False):
                                 for k in range(dst_min_x, dst_max_x):
                                     for l in range(dst_min_y, dst_max_y):
                                         if(dst_is_seen[(k,l)]==False):
                                             ncc_value = ctNcc(getDescFeatures(img, [np.array(i,j)], wid=wid)[0],getDescFeatures(cmp_img, [np.array(k,l)], wid=wid))
-                                            if(1 - ncc_value > 0.5):
-                                                heap.push(MyMatch([np.array(i,j)],[np.array(k,l)],-ncc_value))
+                                            print("ncc_value",ncc_value)
+                                            if(1 - ncc_value > 0.2):
+                                                print("allow")
+                                                
+                                                heap.push(MyMatch([np.array(i,j)],[np.array(k,l)], ncc_value))
                                                 src_is_seen[(i,j)] = True
                                                 dst_is_seen[(k,l)] = True
                                                 
@@ -483,7 +517,7 @@ def DensePointsWithMVS(imgs, args):
                 points = traingulatePoints(P1, P2, np.array(refined_src_features), np.array(refined_dst_features))
                 #points = traingulatePoints(P1, P2, np.concatenate((np.array(refined_src_features),np.array([1 for i in range(len(refined_src_features))]).reshape(-1,1)),axis=1), np.concatenate((np.array(refined_dst_features),np.array([1 for i in range(len(refined_dst_features))]).reshape(-1,1)),axis=1)) 
                 ax = plt.axes(projection='3d')
-                ax.set_title('tow image MVS')
+                ax.set_title('all images MVS')
                 ax.scatter(scale * np.array(points)[:,0], scale * np.array(points)[:,1], scale * np.array(points)[:,2], c=np.array(points)[:,2], cmap='viridis', linewidth=0.1);
                 plt.show()
                                     
