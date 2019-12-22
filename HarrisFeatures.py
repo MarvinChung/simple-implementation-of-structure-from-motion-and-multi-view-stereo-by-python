@@ -85,6 +85,8 @@ def getMatches(im1, im2, locs1, locs2, matchscores, show_below=True):
     metachscores(as output from 'match'), 
     show_below(if images should be shown matches).
     """ 
+    #expect input: locs1 and locs2 point format as  [row, col]
+    #output src_pts and dst_pts point format as [col, row]
     print("plot_matches")
     im3 = appendImages(im1, im2) 
     
@@ -99,7 +101,9 @@ def getMatches(im1, im2, locs1, locs2, matchscores, show_below=True):
     for i,m in enumerate(matchscores): 
         if m>0:
             if show_below: 
-                plt.plot([locs1[i][1],locs2[m][1]+cols1],[locs1[i][0],locs2[m][0]],'c')
+                plt.plot([locs1[i][0],locs2[m][0]+cols1],[locs1[i][1],locs2[m][1]],'c')
+                #plt.plot([locs1[i][0],locs2[m][0]],[locs1[i][1],locs2[m][1]+cols1],'c')
+
             src_pts.append([locs1[i][1],locs1[i][0]])
             dst_pts.append([locs2[m][1],locs2[m][0]])
             match_scores.append(m)
@@ -113,14 +117,19 @@ def getDescFeatures(image, filter_coords, wid=5):
     """
     For each point return pixel values around the point using a neihborhood of 2*width+1.
     Important:
-        coords[0] - wid should not be less than 0 either coords[1] - wid
-        The image should be expand to at least (i+2*width+1, j+2*width+1 ,3) shape
+        The image should be gray scale.
     """ 
-    print("getDescPatches")
+    #print("getDescFeatures")
+    #expect filter_coords point format as  [row, col]
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        image  = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2GRAY)
     desc = []
-    for coords in filter_coords: 
-        patch = image[coords[0]-wid:coords[0]+wid+1, coords[1]-wid:coords[1]+wid+1] 
-        desc.append(patch.flatten()) # use append to add new elements return desc
+    for coords in filter_coords:
+        if(int(coords[0]) - wid >=0 and int(coords[0]) + wid + 1 < image.shape[0] and int(coords[1])-wid > 0 and int(coords[1])+wid+1 < image.shape[1]):
+            d = image[int(coords[0])-wid:int(coords[0])+wid+1, int(coords[1])-wid:int(coords[1])+wid+1] 
+            desc.append(d.flatten()) # use append to add new elements return desc
+    if len(desc) == 0:
+        desc.append(None)
     return desc
                 
 def getHarrisPoints(input_img, debug = False):
@@ -130,8 +139,15 @@ def getHarrisPoints(input_img, debug = False):
     gray = np.float32(gray)
     dst = cv2.cornerHarris(gray,2,3,0.04)
     #result is dilated for marking the corners, not important
+    #plt.imshow(dst)
+    #plt.show()
     dst = cv2.dilate(dst,None)
+    #plt.imshow(dst)
+    #plt.show()
+
     img[dst>0.01*dst.max()]=[0,0,255]
+    
+    points = []
     if debug == True:
         plt.imshow(img)
         plt.show()

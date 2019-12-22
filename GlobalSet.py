@@ -39,15 +39,22 @@ class GlobalSet(object):
         """
         n_observations = 0
         n_points3d = 0
-        legal_set = []
+        legal_sets = []
         
         for i in self.set_list:
             if(self.valid[i]):
                 n_observations += len(self.set_list[i].point2d_list)
                 n_points3d += 1
-                legal_set.append(self.set_list[i])
+                legal_sets.append(self.set_list[i])
         
-        return n_observations, n_points3d, legal_set
+        return n_observations, n_points3d, legal_sets
+
+    def updateWorldPoints(self, update_world_pt):
+        ct = 0
+        for i in self.set_list:
+            if(self.valid[i]):
+                self.set_list[i].world_point = update_world_pt[ct].world_point
+                ct+=1
 #     def get_n_observations(self):
 #         """
 #         return the number of 2d points
