@@ -9,6 +9,8 @@ import pdb
 import math
 from scipy.optimize import least_squares
 import matplotlib.cm as cm
+from pyntcloud import PyntCloud
+import pandas as pd
 
 def example_plot(ax):
     ax.plot([1, 2])
@@ -240,3 +242,10 @@ def projectPoint(point, par_r, par_t, par_K):
     rvec, jacobian = cv2.Rodrigues(par_r)
     out, jacobian = cv2.projectPoints(point, rvec, par_t, par_K, None)
     return out.ravel()
+
+def distance(a, b):
+    return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2 + (a[2] - b[2])**2)    
+
+def export2ply(points, colors, path="output"):
+    cloud = PyntCloud(pd.DataFrame(data=np.hstack((points, colors)),columns=["x", "y", "z", "red",  "green", "blue"]))
+    cloud.to_file(path+".ply")
