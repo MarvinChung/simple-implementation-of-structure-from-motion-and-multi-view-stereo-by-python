@@ -157,6 +157,6 @@ def getHarrisPoints(input_img, debug = False):
     xs,ys = np.where(temp==1)
     points = []
     for x,y in zip(xs,ys):
-        points.append([x,y])
+        points.append([y,x])
     return np.int32(points)
     #return np.float32(points)
