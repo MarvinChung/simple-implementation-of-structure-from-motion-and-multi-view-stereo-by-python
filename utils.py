@@ -249,3 +249,6 @@ def distance(a, b):
 def export2ply(points, colors, path="output"):
     cloud = PyntCloud(pd.DataFrame(data=np.hstack((points, colors)),columns=["x", "y", "z", "red",  "green", "blue"]))
     cloud.to_file(path+".ply")
+
+def vector_norm(vector):
+    return vector/(math.sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2]))
