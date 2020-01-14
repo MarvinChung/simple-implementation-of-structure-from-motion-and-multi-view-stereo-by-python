@@ -78,7 +78,7 @@ class MyPatch(object):
 
 
 class CellTable(object):
-    def __init__(self, imgs, cell_size=2.0):
+    def __init__(self, imgs, cell_size=4.0):
         self.table = []
         self.Q_table = defaultdict(list)
         self.cell_size = cell_size
@@ -106,6 +106,10 @@ class CellTable(object):
         for idx, l_col, l_row in patch.V:
             self.Q_table[(img_id,math.floor(l_col/self.cell_size),math.floor(l_row/self.cell_size))].append(patch)
 
+    def show_table_non_zeros(self):
+        for i,t in enumerate(self.table):
+            print("img ",i," size:",t.shape," has seen:",t.shape[0]*t.shape[1]-np.count_nonzero(t))
+
     def which_cell(self, col, row):
         return math.floor(col/self.cell_size), math.floor(row/self.cell_size)
 
@@ -115,13 +119,23 @@ class CellTable(object):
     def get_color(self, img, col, row):
         return img[int(row)][int(col)]
 
+    def show_cell(self, img, cell_i, cell_j):
+        print("cell_i:",cell_i)
+        print("cell_j:",cell_j)
+        img = img.copy()
+        arr = self.cell_center(cell_i,cell_j)
+        img = cv2.circle(img,tuple([int(arr[0]),int(arr[1])]),5,(0,255,0),-1)
+        plt.imshow(img)
+        plt.show()
+
+
     def filter_out_outlier(self):
         for idx, t in enumerate(self.table):
             for i in range(t.shape[0]):
                 for j in range(t.shape[1]):
                     if(t[i][j] == False):
                         #filter 3 times for better accuracy
-                        for iteration in range(3):
+                        for iteration in range(1):
                             threshold = 0
                             for p in self.Q_table[(idx,i,j)]:
                                 threshold += 1 - p.avg_ncc_score
@@ -229,7 +243,7 @@ def DensePointsWithMVS2(imgs, global_set, args):
                 else:                    
                     c = un_point[:-1]/un_point[-1]
                 dist = distance(c, O_center) 
-                n = (c - O_center)/dist
+                n = (O_center - c)/dist
                 #(centroid, normal, reference_img_index, visible_set, color, dist)
                 color = cells.get_color(imgs[camera_index], point2d_tuple[1], point2d_tuple[2])
                 candidate_patch = MyPatch(c, n, reference_img_index, None, color, dist)
@@ -252,10 +266,10 @@ def DensePointsWithMVS2(imgs, global_set, args):
     for p in initial_patches:
         points_3d.append(p.c)
         colors.append(p.color)
-    if debug:
+    if False:
         ax = plt.axes(projection='3d')
         ax.set_title('initial_patches')
-        ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(points_3d)[:,2], cmap='viridis', linewidth=0.1);
+        ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(colors)/255.0, cmap='viridis', linewidth=0.1);
         plt.show()
     export2ply(np.array(points_3d), np.array(colors), path="initial_patches")
     
@@ -263,7 +277,8 @@ def DensePointsWithMVS2(imgs, global_set, args):
 
     #filter 
     print("filter outliers")
-    cells.filter_out_outlier()
+    #very very slow
+    #cells.filter_out_outlier()
 
     #reconstruct
     print("reconstruct point cloud")
@@ -272,17 +287,20 @@ def DensePointsWithMVS2(imgs, global_set, args):
     t1 = time.time()
 
     print("Optimization took {0:.0f} seconds".format(t1 - t0))
+    print("points len:",len(points_3d))
     ax = plt.axes(projection='3d')
     ax.set_title('reconstruct_results')
-    ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(points_3d)[:,2], cmap='viridis', linewidth=0.1);
+    ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(colors)/255.0, cmap='viridis', linewidth=0.1);
     plt.show()
     export2ply(np.array(points_3d), np.array(colors), path="all_patches")
+
 
 def is_patch_neighbor(patch, non_finished_patch, threshold=0.2):
     return abs(np.dot(patch.c - non_finished_patch.c, patch.n) + np.dot(patch.c - non_finished_patch.c, non_finished_patch.n)) < threshold
 
 
-def ray_plance_intersection(ray_origin, ray_direction, plane_center, plane_normal):
+def ray_plane_intersection(ray_origin, ray_direction, plane_center, plane_normal):
+    #pdb.set_trace()
     dot_out = np.dot(ray_direction, plane_normal)
     t = np.dot(plane_center-ray_origin, plane_normal)/dot_out
     return ray_origin + t * ray_direction
@@ -300,10 +318,12 @@ def patch_expansion(args, imgs, initial_patches, cells, camera_pos, visible_lowe
     #expand_patches = []
 
     iteration = 0
-    while(not patch_queue.empty() and iteration < 10000):
+    while(not patch_queue.empty() and iteration < 100000):
         iteration += 1
         print("iteration:",iteration)
         print("patch_queue size",patch_queue.qsize())
+        #if iteration % 20 == 0:
+        #    cells.show_table_non_zeros()
         patch = patch_queue.get()
         for hit_point in patch.V:
             img_idx = hit_point[0]
@@ -316,35 +336,67 @@ def patch_expansion(args, imgs, initial_patches, cells, camera_pos, visible_lowe
                         c_y = par_K[img_idx][1,2]
                         f_x = par_K[img_idx][0,0]
                         f_y = par_K[img_idx][1,1]
-                        vector = par_r[img_idx].transpose() @ np.array([cell_center[0] - c_x, cell_center[1] - c_y, (f_x + f_y)/2]).reshape(-1)
-                        norm_vector = vector/(math.sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2]))
-                        intersect_point = ray_plance_intersection(camera_pos[img_idx], norm_vector, p.c, patch.n)
+                        
+                        #p_norm = K^-1 * p
+                       
+                        #P_c = R(P_w - C)
+                        #C = -R^transpose @ t
+                        #P_w = R^-1 @ P_c - C 
+                        #R^-1 = R^transpose()
+                        #p_norm = np.linalg.inv(par_K[img_idx]) @ np.array([cell_center[0], cell_center[1], 1])
+                        #p_unnorm = np.array([cell_center[0], cell_center[1], 1])
+                        #C = (-par_r[img_idx].transpose() @ par_t[img_idx]).ravel()
+                        #P_w = par_r[img_idx].transpose() @ p_norm - C
+                        
+                        C = (-par_r[img_idx].transpose() @ par_t[img_idx]).ravel()
+                        P_w = par_r[img_idx].transpose() @ np.array([cell_center[0] - c_x, cell_center[1] - c_y, (f_x + f_y)/2]).reshape(-1) - C
+                        norm_vector = vector_norm(P_w)
+                        intersect_point = ray_plane_intersection(camera_pos[img_idx], norm_vector, patch.c, patch.n)
                         #(centroid, normal, reference_img_index, visible_set, color, dist)
                         O_center = camera_pos[img_idx]
                         color = cells.get_color(imgs[img_idx], cell_center[0], cell_center[1])
                         dist = distance(intersect_point, O_center)
-                        n = (intersect_point - O_center)/dist
+                        n = (O_center - intersect_point)/dist
                         non_finished_patch = MyPatch(intersect_point, n, img_idx, None, color, None)
                         hit_points = non_finished_patch.photo_consistenecy_test(imgs, par_K, par_r, par_t, MIN_NCC = 0.7)
-                        if debug:
-                            points_temp = []
-                            colors = []
-                            points_temp.append(list(camera_pos[img_idx]))
-                            colors.append('blue')
-                            points_temp.append(list(intersect_point))
-                            colors.append('red')
-                            points_temp.append(list(p.c))
-                            colors.append('green')
-                            points_temp.append(list(p.c+0.01*p.n))
-                            colors.append('yellow')
-                            ax = plt.axes(projection='3d')
-                            ax.set_title('debug')
-                            print(n)
-                            ax.scatter(scale * np.array(points_temp)[:,0], scale * np.array(points_temp)[:,1], scale * np.array(points_temp)[:,2], c=colors, cmap='viridis', linewidth=0.1);
-                            plt.show()
+
+
                         #filter out non neighbors
-                        if(non_finished_patch.visible_ct() >= visible_lower_bound and is_patch_neighbor(patch, non_finished_patch, threshold=0.1)):
+                        #print(non_finished_patch.visible_ct())
+                        #print(is_patch_neighbor(patch, non_finished_patch, threshold=0.1))
+                        if(non_finished_patch.visible_ct() >= visible_lower_bound and is_patch_neighbor(patch, non_finished_patch, threshold=0.1) and distance(patch.c, non_finished_patch.c) < 0.05/scale):
                             #expand_patches.append(non_finished_patch)
+                            print("add")
+
+                            if debug:
+                                print("hit_point",hit_point[1],"and",hit_point[2])
+                                cells.show_cell(imgs[img_idx],cell_i + i,cell_j + j)
+                                points_3d, colors = cells.reconstruct_from_Q()
+
+                                print("patch c:",patch.c)
+                                print("non_finished_patch c:",non_finished_patch.c)
+                                print("dist:",distance(patch.c, non_finished_patch.c))
+                                t1 = time.time()
+                                ax = plt.axes(projection='3d')
+                                ax.set_title('reconstruct_results tp')
+                                # for i in range(len(par_t)):
+                                #     points_3d.append(-(par_r[i].transpose()@par_t[i]).ravel())
+                                #     colors.append([150,150,155])
+
+                                points_3d.append(non_finished_patch.c)
+                                points_3d.append(patch.c)
+                                #points_3d.append(C)
+
+                                colors.append([255,0,0])
+                                colors.append([0,255,0])
+                                #colors.append([0,255,255])
+
+                                for i in range(1,10,1):
+                                    points_3d.append(patch.c+i*0.01*patch.n)
+                                    colors.append([0,0,255])
+                                ax.scatter(scale * np.array(points_3d)[:,0], scale * np.array(points_3d)[:,1], scale * np.array(points_3d)[:,2], c=np.array(colors)/255.0, cmap='viridis', linewidth=0.1);
+                                plt.show()
+
                             for hit_point in hit_points:
                                 cells.fill_with_point(hit_point[0], hit_point[1], hit_point[2], non_finished_patch)
                                 patch_queue.put(non_finished_patch)
