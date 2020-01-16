@@ -1,4 +1,5 @@
-# ToySFM2MVS
+# simple implementation of structure from motion and multi view stereo by python
+
 
 structure from motion sparse point cloud to dense point cloud 
 
