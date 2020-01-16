@@ -349,7 +349,8 @@ def patch_expansion(args, imgs, initial_patches, cells, camera_pos, visible_lowe
                         #P_w = par_r[img_idx].transpose() @ p_norm - C
                         
                         C = (-par_r[img_idx].transpose() @ par_t[img_idx]).ravel()
-                        P_w = par_r[img_idx].transpose() @ np.array([cell_center[0] - c_x, cell_center[1] - c_y, (f_x + f_y)/2]).reshape(-1) - C
+                        #print(C)
+                        P_w = par_r[img_idx].transpose() @ np.array([cell_center[0] - c_x, cell_center[1] - c_y, (f_x + f_y)/2]).reshape(-1) + C
                         norm_vector = vector_norm(P_w)
                         intersect_point = ray_plane_intersection(camera_pos[img_idx], norm_vector, patch.c, patch.n)
                         #(centroid, normal, reference_img_index, visible_set, color, dist)
@@ -364,11 +365,11 @@ def patch_expansion(args, imgs, initial_patches, cells, camera_pos, visible_lowe
                         #filter out non neighbors
                         #print(non_finished_patch.visible_ct())
                         #print(is_patch_neighbor(patch, non_finished_patch, threshold=0.1))
+                        #print(distance(patch.c, non_finished_patch.c))
                         if(non_finished_patch.visible_ct() >= visible_lower_bound and is_patch_neighbor(patch, non_finished_patch, threshold=0.1) and distance(patch.c, non_finished_patch.c) < 0.05/scale):
-                            #expand_patches.append(non_finished_patch)
-                            print("add")
+                            #print("add")
 
-                            if debug:
+                            if False:
                                 print("hit_point",hit_point[1],"and",hit_point[2])
                                 cells.show_cell(imgs[img_idx],cell_i + i,cell_j + j)
                                 points_3d, colors = cells.reconstruct_from_Q()
