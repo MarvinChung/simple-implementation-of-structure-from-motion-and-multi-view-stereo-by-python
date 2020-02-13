@@ -1,8 +1,5 @@
-#from PIL import Image
-#from QuickSets import GlobalSets
 from GlobalSet import GlobalSet
 from argparse import ArgumentParser
-from MVS import *
 from utils import *
 from SFM import *
 from MVS2 import * 
@@ -30,8 +27,6 @@ def main(args, threshold = 0.01, MIN_REPROJECTION_ERROR = 0.3):
     global_set = GlobalSet(threshold = threshold)    
         
     StructureFromMotion(imgs, global_set, args, MIN_REPROJECTION_ERROR)
-    #Test2MethodsOfDensePointsWithTwoViewStereo(imgs, args)
-    #DensePointsWithMVS(imgs[:2], global_set, args) 
     DensePointsWithMVS2(imgs, global_set, args)
 
 if __name__== "__main__":
