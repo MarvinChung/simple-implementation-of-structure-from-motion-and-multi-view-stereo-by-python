@@ -1,8 +1,5 @@
 # simple implementation of structure from motion and multi view stereo by python
 
-# (SFM.py is lost. Will be reuploaded in these days)
-
-
 structure from motion sparse point cloud to dense point cloud 
 
 dataset is available at:
